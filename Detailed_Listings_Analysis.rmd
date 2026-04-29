@@ -1,0 +1,2102 @@
+---
+title: "Comprehensive Analysis of Boston Airbnb Detailed Listings"
+author: "Fall Foliage"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 3
+    fig_width: 10
+    fig_height: 6
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  message = FALSE, 
+  fig.align = "center",
+  fig.width = 12,
+  fig.height = 8,
+  fig.dpi = 300,              
+  dev = "png",                
+  dev.args = list(bg = "transparent"),  
+  cache = TRUE
+)
+
+# Custom color palette
+theme_colors <- list(
+  primary = "#3498db",        
+  secondary = "#1abc9c",      
+  accent = "#16a085",         
+  dark = "#008B8B",        
+  light = "#87CEEB",         
+  gradient_start = "#5DADE2", 
+  gradient_end = "#138D75",   
+  highlight = "#AED6F1",      
+  text = "#2C3E50",          
+  additional = "#3CB371"
+)
+
+# Custom ggplot theme with transparent background
+theme_transparent <- function() {
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+    panel.grid.minor = element_line(color = "grey95", linewidth = 0.25),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    plot.title = element_text(face = "bold", size = 16, color = theme_colors$text, 
+                              margin = margin(b = 10)),
+    plot.subtitle = element_text(size = 12, color = theme_colors$text, 
+                                 margin = margin(b = 15)),
+    axis.title = element_text(size = 12, color = theme_colors$text),
+    axis.text = element_text(size = 10, color = theme_colors$text),
+    legend.text = element_text(size = 10, color = theme_colors$text),
+    legend.title = element_text(size = 11, face = "bold", color = theme_colors$text),
+    strip.text = element_text(size = 11, face = "bold", color = theme_colors$text),
+    strip.background = element_rect(fill = "transparent", color = NA)
+  )
+}
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+# Core data manipulation
+library(readr)
+library(glue)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(purrr)
+library(mgcv)
+
+
+# Visualization
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(RColorBrewer)
+library(viridis)
+library(scales)
+
+# Mapping and geographic analysis
+library(leaflet)
+library(sf)
+library(ggmap)
+
+# Statistical analysis
+library(corrplot)
+library(skimr)
+library(cluster)
+library(factoextra)
+library(NbClust)
+
+# Time series
+library(xts)
+library(zoo)
+library(forecast)
+
+# Text analysis (for amenities)
+library(stringr)
+
+```
+
+# 1. Data Overview
+
+## 1.1 Data Loading
+
+```{r load_data}
+# Load the detailed listings dataset
+df_raw <- read_csv("data/listings_detailed.csv", 
+                   na = c("", "NA", "N/A", "null"),
+                   show_col_types = FALSE)
+
+# Initial dataset dimensions
+cat("=== DATASET OVERVIEW ===\n")
+cat("Total Observations:", nrow(df_raw), "\n")
+cat("Total Variables:", ncol(df_raw), "\n")
+cat("\nColumn Names:\n")
+cat(paste(colnames(df_raw), collapse = ", "), "\n")
+```
+
+This dataset comes from Airbnb’s public listings for Boston (as compiled by Inside Airbnb) and reflects the state of the market from June to September 2025. Each row corresponds to a single listing and includes host, property, pricing, review and availability information used later for segmentation and performance analysis.
+
+## 1.2 Missing Data Analysis
+
+```{r missing_data_analysis}
+# Comprehensive missing data analysis
+missing_analysis <- df_raw |>
+  summarise(across(everything(), ~sum(is.na(.)))) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_count") |>
+  mutate(missing_pct = round(missing_count / nrow(df_raw) * 100, 2)) |>
+  filter(missing_count > 0) |>
+  arrange(desc(missing_pct))
+
+cat("=== MISSING DATA SUMMARY ===\n")
+cat("Variables with missing data:", nrow(missing_analysis), "out of", ncol(df_raw), "\n\n")
+print(head(missing_analysis, 20))
+
+# Visualize missing data pattern
+missing_data <-
+  ggplot(missing_analysis |> head(15),
+         aes(x = reorder(variable, missing_pct), y = missing_pct)) +
+    geom_bar(stat = "identity", fill = theme_colors$primary, alpha = 0.8) +
+    coord_flip() +
+    labs(title = "Missing Data Percentage by Variable (Top 15)",
+         x = "Variable",
+         y = "Missing Data (%)") +
+    theme_transparent() +
+    theme(
+      plot.title = element_text(face = "bold", color = theme_colors$text),
+      panel.grid.minor = element_blank()
+    )
+
+print(missing_data)
+
+```
+
+Variables that were entirely missing (e.g., neighbourhood_group_cleansed, calendar_updated) were excluded from modeling and, where necessary, reconstructed from related fields.
+
+
+# 2. Exploratory Data Analysis
+
+## 2.1 Price Cleaning
+
+```{r clean_price}
+# Clean price column (remove $ and convert to numeric)
+df <- df_raw |>
+  mutate(
+    price_clean = as.numeric(str_remove_all(price, "[$,\\s]")),
+   price_category = case_when(
+   price_clean < 100 ~ "Budget",
+   price_clean < 170 ~ "Economy",
+   price_clean < 250 ~ "Mid-range",
+   price_clean < 350 ~ "Premium",
+   TRUE ~ "Luxury"
+)
+,
+    price_category = factor(price_category, 
+                           levels = c("Budget", "Economy", "Mid-range", "Premium", "Luxury"))
+  )
+
+# Remove extreme outliers (top 0.5% and bottom 0.5%)
+price_q01 <- quantile(df$price_clean, 0.005, na.rm = TRUE)
+price_q995 <- quantile(df$price_clean, 0.995, na.rm = TRUE)
+
+df <- df |>
+  mutate(price_clean = ifelse(price_clean < price_q01 | price_clean > price_q995, 
+                               NA, price_clean))
+
+cat("Price range after cleaning: $", min(df$price_clean, na.rm = TRUE), 
+    " - $", max(df$price_clean, na.rm = TRUE), "\n")
+cat("Price outliers removed (0.5% tails):", 
+    sum(df_raw$price_clean < price_q01 | df_raw$price_clean > price_q995, na.rm = TRUE), 
+    "observations\n")
+cat("Key Percentiles")
+quantile(df$price_clean, probs = seq(0, 1, 0.1), na.rm = TRUE)
+```
+
+Although a 0.5% tail-trimming rule was applied to remove potential price-entry errors, no observations fell outside the statistical bounds. This indicates that the extremely high nightly prices (e.g., \$40,000–$50,000) are genuine rather than numerical anomalies. Because such ultra-luxury listings represent a meaningful market segment rather than noise, we deliberately keep them for further analysis and allow the clustering algorithm to treat them as a distinct pricing subgroup.
+
+## 2.2 Host Response Rate and Acceptance Rate Cleaning
+
+```{r clean_host_metrics}
+# Clean host response and acceptance rates (convert percentages)
+df <- df |>
+  mutate(
+    host_response_rate_num = as.numeric(str_remove_all(host_response_rate, "[%]")) / 100,
+    host_acceptance_rate_num = as.numeric(str_remove_all(host_acceptance_rate, "[%]")) / 100,
+    host_is_superhost_bool = ifelse(host_is_superhost == "TRUE", TRUE, FALSE)
+  )
+
+cat("Host response rate range:", 
+    round(min(df$host_response_rate_num, na.rm = TRUE) * 100, 1), "% -",
+    round(max(df$host_response_rate_num, na.rm = TRUE) * 100, 1), "%\n")
+cat("Superhosts:", sum(df$host_is_superhost_bool, na.rm = TRUE), 
+    "(", round(mean(df$host_is_superhost_bool, na.rm = TRUE) * 100, 1), "% )\n")
+```
+
+Almost a third of all hosts are Superhosts, meaning they are top-rated, experienced host for providing exceptional hospitality, meeting strict criteria like high response rates (90%+), low cancellation rates (<1%), high overall ratings (4.8+), and hosting a minimum number of stays/nights, earning perks like travel coupons and increased guest trust.
+
+## 2.3 Date Column Processing
+
+```{r process_dates}
+# Convert date columns
+df <- df |>
+  mutate(
+    host_since_date = as.Date(host_since),
+    first_review_date = as.Date(first_review),
+    last_review_date = as.Date(last_review),
+    last_scraped_date = as.Date(last_scraped),
+    # Calculate host experience in days
+    host_experience_days = as.numeric(last_scraped_date - host_since_date),
+    host_experience_years = host_experience_days / 365,
+    # Time since first review
+    days_since_first_review = as.numeric(last_scraped_date - first_review_date),
+    # Time since last review
+    days_since_last_review = as.numeric(last_scraped_date - last_review_date)
+  )
+
+cat("Host experience range:", round(min(df$host_experience_years, na.rm = TRUE), 1), 
+    "-", round(max(df$host_experience_years, na.rm = TRUE), 1), "years\n")
+```
+
+## 2.4 Amenities Feature Engineering & Analysis
+
+```{r process_amenities}
+# Count amenities and identify key amenities
+df <- df |>
+  mutate(
+    amenity_count = str_count(amenities, ",") + 1,
+    has_wifi = str_detect(amenities, "(?i)wifi|(?i)internet"),
+    has_kitchen = str_detect(amenities, "(?i)kitchen"),
+    has_heating = str_detect(amenities, "(?i)heating"),
+    has_ac = str_detect(amenities, "(?i)air conditioning|(?i)ac"),
+    has_parking = str_detect(amenities, "(?i)parking|(?i)free parking"),
+    has_washer = str_detect(amenities, "(?i)washer"),
+    has_dryer = str_detect(amenities, "(?i)dryer"),
+    has_tv = str_detect(amenities, "(?i)tv|(?i)television"),
+    has_workspace = str_detect(amenities, "(?i)workspace|(?i)laptop"),
+    has_gym = str_detect(amenities, "(?i)gym|(?i)fitness"),
+    premium_amenity_score = has_wifi + has_kitchen + has_heating + has_ac + 
+                           has_parking + has_washer + has_dryer + has_tv + 
+                           has_workspace + has_gym
+  )
+
+amenities <- tibble(
+  amenity = c("wifi", "kitchen", "heating", "ac", "parking", "washer", "dryer", "tv", "workspace", "gym"),
+  listings_with_amenity = c(
+    sum(df$has_wifi, na.rm = TRUE),
+    sum(df$has_kitchen, na.rm = TRUE),
+    sum(df$has_heating, na.rm = TRUE),
+    sum(df$has_ac, na.rm = TRUE),
+    sum(df$has_parking, na.rm = TRUE),
+    sum(df$has_washer, na.rm = TRUE),
+    sum(df$has_dryer, na.rm = TRUE),
+    sum(df$has_tv, na.rm = TRUE),
+    sum(df$has_workspace, na.rm = TRUE),
+    sum(df$has_gym, na.rm = TRUE)
+  ),
+  pct_of_listings_with_amenity = c(
+    round(mean(df$has_wifi, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_kitchen, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_heating, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_ac, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_parking, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_washer, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_dryer, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_tv, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_workspace, na.rm = TRUE) * 100, 2),
+    round(mean(df$has_gym, na.rm = TRUE) * 100, 2)
+  )
+)
+
+amenities
+
+amenities_distribution <- amenities |>
+  ggplot(aes(x = reorder(amenity, -pct_of_listings_with_amenity), y = pct_of_listings_with_amenity, fill = amenity)) +
+  geom_bar(stat = "identity", fill = theme_colors$primary) +
+  geom_text(aes(label = paste0(round(pct_of_listings_with_amenity, 1), "%")),
+            vjust = -0.4, size = 3) +
+  labs(title = "Distribution of Popular Amenities",
+       x = "Amenity",
+       y = "Percentage of Listings with Amenity") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1),
+        panel.grid.minor = element_blank())
+
+amenities_distribution
+```
+
+The selected amenities focus on features that are both frequently present and plausibly monetizable (e.g., WiFi, kitchen, climate control, parking, in-unit laundry, workspace, gym). This compact set avoids overfitting to very rare amenities while still capturing a meaningful notion of “amenity richness” that is interpretable for hosts and guests.
+
+## 2.5 Revenue and Performance Metrics
+
+```{r create_performance_metrics}
+# Create comprehensive performance metrics
+
+review_subscores <- as.matrix(df[, c("review_scores_accuracy", "review_scores_cleanliness",
+                                      "review_scores_checkin", "review_scores_communication",
+                                      "review_scores_location", "review_scores_value")])
+
+
+review_sub_mean <- rowMeans(review_subscores, na.rm = TRUE)
+review_sub_mean[is.nan(review_sub_mean)] <- NA_real_
+
+
+df <- df |>
+  mutate(
+    avg_review_score = ifelse(is.na(review_scores_rating),
+                              review_sub_mean,
+                              review_scores_rating),
+    revenue_l365d = ifelse(is.na(estimated_revenue_l365d), 
+                           price_clean * (365 - availability_365), 
+                           estimated_revenue_l365d),
+    revenue_per_bed = revenue_l365d / ifelse(beds > 0, beds, 1),
+    revenue_per_bedroom = revenue_l365d / ifelse(bedrooms > 0, bedrooms, 1),
+    occupancy_rate = ifelse(is.na(estimated_occupancy_l365d),
+                            (365 - availability_365) / 365,
+                            estimated_occupancy_l365d / 100),
+    review_activity_score = reviews_per_month * avg_review_score,
+    price_per_person = price_clean / accommodates,
+    listing_efficiency = revenue_l365d / (price_clean + 1)  # Revenue per unit price
+  )
+
+df <- df |>
+  mutate(
+    reviews_per_month = ifelse(is.na(reviews_per_month), 0, reviews_per_month),
+    number_of_reviews = ifelse(is.na(number_of_reviews), 0, number_of_reviews),
+    occupancy_rate = ifelse(is.na(occupancy_rate) | occupancy_rate < 0, 0, 
+                           ifelse(occupancy_rate > 1, 1, occupancy_rate))
+  )
+
+cat("Revenue metrics created successfully.\n")
+cat("Average annual revenue: $", round(mean(df$revenue_l365d, na.rm = TRUE), 0), "\n")
+cat("Average occupancy rate:", round(mean(df$occupancy_rate, na.rm = TRUE) * 100, 1), "%\n")
+```
+
+When Airbnb’s estimated revenue or occupancy figures were missing, we approximated them using nightly price and availability under the assumption of a constant price over the year. This introduces a mild optimistic bias for highly seasonal listings but provides a consistent, transparent way to recover performance metrics for a large share of the dataset.
+
+## 2.6 Neighbourhood Grouping
+
+```{r neighborhood_grouping}
+# Load neighbourhood boundaries GeoJSON for mapping (used in geographic sections)
+neighbourhoods_geo <- st_read("data/neighbourhoods.geojson", quiet = TRUE)
+cat("\nLoaded", nrow(neighbourhoods_geo), "neighbourhood boundaries from GeoJSON\n")
+```
+
+## 2.7 Geographic Distribution Overview
+
+```{r geographic_overview}
+# Basic geographic summary
+cat("=== GEOGRAPHIC COVERAGE ===\n")
+cat("Latitude range:", round(min(df$latitude, na.rm = TRUE), 4), "-", 
+    round(max(df$latitude, na.rm = TRUE), 4), "\n")
+cat("Longitude range:", round(min(df$longitude, na.rm = TRUE), 4), "-", 
+    round(max(df$longitude, na.rm = TRUE), 4), "\n")
+cat("\nNeighbourhoods covered:", length(unique(df$neighbourhood_cleansed)), "\n")
+
+
+df_map <- df |>
+  filter(!is.na(latitude), !is.na(longitude), !is.na(price_clean),
+         latitude > 42.2 & latitude < 42.4,
+         longitude > -71.2 & longitude < -70.9)
+
+
+df_map_sample <- df_map |>
+  sample_n(min(2000, nrow(df_map)))
+
+
+price_pal <- colorNumeric(
+  palette = colorRampPalette(c(theme_colors$light, theme_colors$primary, 
+                               theme_colors$accent, theme_colors$dark))(100),
+  domain = df_map_sample$price_clean
+)
+
+price_range <- range(df_map_sample$price_clean, na.rm = TRUE)
+
+visible_prices <- df_map_sample$price_clean[!is.na(df_map_sample$longitude)]
+
+price_pal <- colorNumeric(
+  palette = colorRampPalette(c(
+    theme_colors$light,
+    theme_colors$primary,
+    theme_colors$accent,
+    theme_colors$dark
+  ))(100),
+  domain = price_range
+)
+
+# Map 1: Price Distribution with Neighbourhood Boundaries
+map_price <- leaflet() |>
+  addProviderTiles(providers$CartoDB.Positron, options = providerTileOptions(opacity = 0.9)) |>
+  addPolygons(
+    data = neighbourhoods_geo,
+    fillColor = "transparent",
+    fillOpacity = 0,
+    color = theme_colors$text,
+    weight = 1.5,
+    opacity = 0.6,
+    label = ~neighbourhood,
+    labelOptions = labelOptions(noHide = FALSE, textOnly = FALSE)
+  ) |>
+  addCircleMarkers(
+    data = df_map_sample,
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 4,
+    color = ~price_pal(price_clean),
+    fillColor = ~price_pal(price_clean),
+    fillOpacity = 0.6,
+    stroke = TRUE,
+    weight = 0.5,
+    popup = ~paste(
+      "<b>Price:</b> $", round(price_clean, 0), "<br>",
+      "<b>Room Type:</b>", room_type, "<br>",
+      "<b>Accommodates:</b>", accommodates, "<br>",
+      "<b>Neighbourhood:</b>", neighbourhood_cleansed, "<br>",
+      "<b>Reviews:</b>", number_of_reviews, "<br>",
+      "<b>Rating:</b>", round(review_scores_rating, 1), "/5.0"
+    ),
+    clusterOptions = markerClusterOptions(
+      spiderfyOnMaxZoom = TRUE,
+      showCoverageOnHover = TRUE,
+      zoomToBoundsOnClick = TRUE
+    )
+  ) |>
+  leaflet::addLegend(
+    "bottomright",
+    pal = price_pal,
+    values = price_range,
+    title = "Price ($)",
+    opacity = 0.8
+  )
+
+map_price
+```
+
+## 2.8 Correlation Analysis
+
+```{r correlation_analysis}
+# Select numeric variables for correlation
+numeric_vars <- df |>
+  select(price_clean, accommodates, bedrooms, beds, bathrooms, 
+         number_of_reviews, reviews_per_month, review_scores_rating,
+         host_response_rate_num, host_listings_count,
+         availability_365, occupancy_rate, revenue_l365d,
+         amenity_count, premium_amenity_score,
+         host_experience_years) |>
+  drop_na() 
+
+
+cor_matrix <- cor(numeric_vars)
+
+
+corrplot(cor_matrix, 
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = theme_colors$text,
+         tl.srt = 45,
+         tl.cex = 0.7,
+         addCoef.col = "black",
+         number.cex = 0.6,
+         col = colorRampPalette(c(theme_colors$dark, "white", theme_colors$primary))(200),
+         title = "Correlation Matrix: Key Numeric Variables",
+         mar = c(0, 0, 2, 0))
+
+
+cat("\n=== STRONG CORRELATIONS (|r| > 0.5) ===\n")
+cor_pairs <- expand.grid(row = rownames(cor_matrix), col = colnames(cor_matrix)) |>
+  mutate(cor_value = as.vector(cor_matrix)) |>
+  filter(row != col, abs(cor_value) > 0.5) |>
+  arrange(desc(abs(cor_value))) |>
+  distinct(cor_value, .keep_all = TRUE) |>
+  head(10)
+
+print(cor_pairs)
+```
+
+
+
+
+# 3. Host Analysis
+
+## 3.1 Superhosts vs. Regular Hosts Performance
+
+```{r superhost_analysis}
+# Compare superhosts vs regular hosts
+host_comparison <- df |>
+  filter(!is.na(host_is_superhost_bool)) |>
+  group_by(host_is_superhost_bool) |>
+  summarise(
+    n_listings = n(),
+    avg_rating = mean(review_scores_rating, na.rm = TRUE),
+    avg_revenue = mean(revenue_l365d, na.rm = TRUE),
+    avg_occupancy = mean(occupancy_rate, na.rm = TRUE) * 100,
+    avg_response_rate = mean(host_response_rate_num, na.rm = TRUE) * 100,
+    pct_entire_home = mean(room_type == "Entire home/apt", na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) |>
+  mutate(host_type = ifelse(host_is_superhost_bool, "Superhost", "Regular Host"))
+
+cat("=== SUPERHOST VS REGULAR HOST COMPARISON ===\n")
+print(host_comparison)
+
+# Visualization
+p1 <- host_comparison |>
+  select(host_type, avg_rating, avg_revenue, avg_occupancy) |>
+  pivot_longer(cols = -host_type, names_to = "metric", values_to = "value") |>
+  mutate(metric = str_remove_all(metric, "avg_") |>
+                    str_replace_all("_", " ") |>
+                    str_to_title(),
+         metric = ifelse(metric == "Revenue", "Revenue ($)", 
+                        ifelse(metric == "Occupancy", "Occupancy (%)",
+                              metric))) |>
+  ggplot(aes(x = metric, y = value, fill = host_type)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  scale_fill_manual(values = c("Superhost" = theme_colors$accent,
+                               "Regular Host" = theme_colors$primary)) +
+  facet_wrap(~metric, scales = "free", ncol = 4) +
+  labs(title = "Superhost vs Regular Host Performance",
+       x = "",
+       y = "Value",
+       fill = "Host Type") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "bottom",
+        axis.text.x = element_blank(),
+        strip.text = element_text(face = "bold"))
+
+print(p1)
+```
+
+## 3.2 Average Revenue by Host Response Rate
+
+```{r host_type_revenue}
+df_clean <- df |>
+  filter(!is.na(host_response_rate_num),
+         !is.na(revenue_l365d),
+         host_response_rate_num >= 0,
+         host_response_rate_num <= 1,
+         !is.na(host_is_superhost_bool)) |>
+  mutate(
+    host_type = if_else(host_is_superhost_bool, "Superhost", "Regular host")
+  )
+
+df_buckets_type <- df_clean |>
+  mutate(response_bucket = cut(
+    host_response_rate_num,
+    breaks = c(0, 0.5, 0.7, 0.9, 0.99, 1),
+    labels = c("0–50%", "50–70%", "70–90%", "90–99%", "100%"),
+    include.lowest = TRUE
+  )) |>
+  group_by(response_bucket, host_type) |>
+  summarise(
+    mean_revenue = mean(revenue_l365d, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  filter(!is.na(response_bucket))
+
+p2 <- ggplot(df_buckets_type,
+       aes(x = response_bucket, y = mean_revenue, fill = host_type)) +
+  geom_col(position = "dodge", alpha = 0.85, color = "white") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_fill_manual(values = c(
+    "Regular host" = theme_colors$primary,
+    "Superhost"    = theme_colors$accent
+  )) +
+  labs(
+    title = "Average Annual Revenue by Response Rate and Host Type",
+    x = "Host Response Rate",
+    y = "Average Annual Revenue ($)",
+    fill = "Host Type"
+  ) +
+  theme_transparent() +
+  theme(
+    axis.text.x = element_text(angle = 15, hjust = 1),
+    legend.position = "bottom"
+  )
+
+print(p2)
+```
+
+
+
+## 3.3 Average Revenue by Host Portfolio
+
+```{r portfolio_vs_listing_revenue_host_type}
+host_portfolio_summary <- df |>
+  filter(!is.na(host_listings_count),
+         host_listings_count > 0,
+         !is.na(revenue_l365d),
+         !is.na(host_is_superhost_bool)) |>
+  mutate(
+    portfolio_group = case_when(
+      host_listings_count == 1        ~ "Single",
+      host_listings_count <= 3        ~ "Small (2–3)",
+      host_listings_count <= 10       ~ "Medium (4–10)",
+      host_listings_count <= 50       ~ "Large (11–50)",
+      TRUE                            ~ "Very Large (50+)"
+    ),
+    portfolio_group = factor(
+      portfolio_group,
+      levels = c("Single", "Small (2–3)", "Medium (4–10)",
+                 "Large (11–50)", "Very Large (50+)")
+    ),
+    host_type = if_else(host_is_superhost_bool, "Superhost", "Regular host")
+  ) |>
+  group_by(portfolio_group, host_type) |>
+  summarise(
+    mean_rev   = mean(revenue_l365d, na.rm = TRUE),
+    n_listings = n(),
+    .groups    = "drop"
+  )
+
+p3 <- ggplot(host_portfolio_summary,
+       aes(x = portfolio_group, y = mean_rev, fill = host_type)) +
+  geom_col(position = "dodge", alpha = 0.85, color = "white") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_fill_manual(values = c(
+    "Regular host" = theme_colors$primary,
+    "Superhost"    = theme_colors$accent
+  )) +
+  labs(
+    title    = "Average Revenue per Listing by Portfolio Size and Host Type",
+    x        = "Portfolio Size",
+    y        = "Avg Annual Revenue ($)",
+    fill     = "Host Type",
+    subtitle = "Comparing regular hosts and Superhosts at each portfolio size"
+  ) +
+  theme_transparent() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x     = element_text(angle = 15, hjust = 1)
+  )
+
+print(p3)
+```
+
+
+
+## 3.4 Annual Revenue Time Series by Host Experience
+
+```{r time_series_experience}
+host_exp_perf <- df |>
+filter(!is.na(host_experience_years),
+host_experience_years >= 0,
+host_experience_years <= 15)  # trim extreme values
+
+p4 <- ggplot(host_exp_perf, aes(x = host_experience_years,
+                          y = revenue_l365d)) +
+  geom_point(alpha = 0.15, color = theme_colors$primary, size = 1) +
+  geom_smooth(method = "loess", color = theme_colors$accent, 
+              linewidth = 1.4, se = TRUE) +
+  scale_y_log10(labels = scales::dollar_format(),
+                breaks = c(1000, 5000, 10000, 25000, 50000, 
+                           100000, 250000, 500000, 1000000)) +
+  labs(
+    title = "Host Experience vs. Annual Revenue",
+    subtitle = "Log scale reveals trend hidden by extreme outliers",
+    x = "Years as Host",
+    y = "Annual Revenue ($, log scale)"
+  ) +
+  theme_transparent()
+
+print(p4)
+```
+
+This shows that most hosts—no matter how long they've been hosting—earn roughly similar annual revenue.
+
+# 4. Property Analysis
+
+## 4.1 Room and Property Type Analysis
+
+```{r room_type}
+# Room type distribution
+room_type_dist <- df |>
+  select(room_type) |>
+  filter(!is.na(room_type)) |>
+  count(room_type) |>
+  mutate(pct_of_listings = round(n/sum(n) * 100, 2)) |>
+  arrange(desc(pct_of_listings))
+
+room_type_dist
+
+room_type_plot <-
+  ggplot(room_type_dist, aes(x = reorder(room_type, -pct_of_listings), y = pct_of_listings, fill = room_type)) +
+  geom_col(width = 0.8, color = "white", linewidth = 0.5) + 
+  geom_text(aes(label = paste0(round(pct_of_listings, 2), "%")),
+            position = position_stack(vjust = 0.8), size = 4) +
+  scale_fill_manual(values = c(theme_colors$primary, theme_colors$secondary, theme_colors$light, theme_colors$dark)) +
+  labs(title = "Distribution of Room Types",
+       x = "Room Type", y = "Percentage of Listings") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1),
+        panel.grid.minor = element_blank())
+```
+```{r property_type}
+# Property type distribution
+unique(df$property_type)
+df$property_type <- case_when(
+  str_detect(df$property_type, "rental unit") ~ "rental unit",
+  str_detect(df$property_type, "condo") ~ "condo",
+  str_detect(df$property_type, "home") ~ "home",
+  str_detect(df$property_type, "townhouse") ~ "townhouse",
+  str_detect(df$property_type, "guesthouse") ~ "guesthouse",
+  str_detect(df$property_type, "serviced apartment") ~ "serviced apartment",
+  str_detect(df$property_type, "hostel") ~ "hostel",
+  str_detect(df$property_type, "hotel") ~ "hotel",
+  str_detect(df$property_type, "guest suite") ~ "guest suite",
+  TRUE ~ "other"
+)
+
+property_type_dist <- df |>
+  select(property_type) |>
+  filter(!is.na(property_type)) |>
+  count(property_type) |>
+  mutate(pct_of_listings = round(n/sum(n) * 100, 2)) |>
+  arrange(desc(pct_of_listings))
+
+property_type_dist
+
+property_type_plot <-
+  ggplot(property_type_dist, aes(x = reorder(property_type, pct_of_listings), y = pct_of_listings, fill = property_type)) +
+  geom_col(width = 0.8, color = "white", linewidth = 0.5) + 
+  geom_text(aes(label = paste0(round(pct_of_listings, 4), "%")),
+            position = position_stack(vjust = 0.8), size = 4) +
+  scale_fill_manual(values = c(theme_colors$primary, theme_colors$secondary, theme_colors$light, theme_colors$dark, theme_colors$accent, theme_colors$gradient_start, theme_colors$gradient_end, theme_colors$highlight, theme_colors$text, theme_colors$additional)) +
+  coord_flip() +
+  labs(title = "Distribution of Property Types",
+       x = "Room Type", y = "Percentage of Listings") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1),
+        panel.grid.minor = element_blank())
+```
+```{r room_property_type_plots, fig.width=15, fig.height=10}
+grid.arrange(room_type_plot, property_type_plot, ncol=2)
+```
+```{r prop_room_type_values, fig.width=20}
+review_value_by_prop_and_room_type <- df |>
+  select(property_type, room_type, review_scores_value) |>
+  filter(!is.na(review_scores_value)) |>
+  group_by(property_type, room_type) |>
+  summarize(num_listings = n(),
+            avg_value = round(mean(review_scores_value), 2)) |>
+  filter(num_listings >= 50) |>
+  arrange(desc(avg_value))
+
+review_value_by_prop_and_room_type
+
+ggplot(review_value_by_prop_and_room_type, aes(x = reorder(property_type, avg_value), y = room_type, fill = avg_value)) +
+  geom_tile(color = "white", 
+            linewidth = 0) +
+  scale_fill_gradient(low = theme_colors$gradient_start, 
+                      high = theme_colors$gradient_end) +
+  coord_fixed() +
+  labs(
+    title = "Average Review Score Value by Property and Room Type",
+    x = "Room Type",
+    y = "Property Type",
+    fill = "Avg Review Score Value"
+  ) +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 12, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+```
+
+## 4.2 Property Location Distributions
+
+```{r locations_by_listings}
+
+top10_neighbourhoods_by_listings <- df |>
+  select(neighbourhood_cleansed) |>
+  count(neighbourhood_cleansed) |>
+  mutate(pct = round(n/sum(n) * 100, 2)) |>
+  arrange(desc(pct)) |>
+  slice_head(n = 10)
+
+top10_neighbourhoods_by_listings
+
+p1 <- top10_neighbourhoods_by_listings |>
+  ggplot(aes(x = reorder(neighbourhood_cleansed, pct), 
+             y = pct, 
+             fill = pct)) +
+  geom_bar(stat = "identity", 
+           color = "white", 
+           alpha = 0.8, 
+           linewidth = 0.5) +
+  geom_text(aes(label = paste0(round(pct, 2), "%")),
+            position = position_stack(vjust = 0.9), size = 4) +
+  coord_flip() +
+  scale_fill_gradient(low = theme_colors$light, 
+                      high = theme_colors$dark) +
+  labs(title = "Top 10 Neighbourhoods by Number of Listings",
+       x = "Neighbourhood", 
+       y = "Percentage of Listings") +
+  theme_transparent() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold",
+                              size = 12,
+                              color = theme_colors$text),
+    panel.grid.minor = element_blank()
+  )
+```
+```{r locations_by_avg_num_of_reviews}
+
+top10_neighbourhoods_by_avg_num_of_reviews <- df |>
+  filter(!is.na(number_of_reviews)) |>
+  group_by(neighbourhood_cleansed) |>
+  summarize(avg_num_reviews = round(mean(number_of_reviews), 0)) |>
+  arrange(desc(avg_num_reviews)) |>
+  head(10)  
+
+top10_neighbourhoods_by_avg_num_of_reviews
+
+p2 <- top10_neighbourhoods_by_avg_num_of_reviews |>
+  ggplot(aes(x = reorder(neighbourhood_cleansed, avg_num_reviews), 
+                              y = avg_num_reviews, 
+                              fill = avg_num_reviews)) +
+  geom_bar(stat = "identity", 
+           alpha = 0.8, 
+           color = "white", 
+           linewidth = 0.5) +
+  geom_text(aes(label = avg_num_reviews),
+            position = position_stack(vjust = 0.9), size = 4) +
+  coord_flip() +
+  scale_fill_gradient(low = theme_colors$light, 
+                      high = theme_colors$dark) +
+  labs(title = "Top 10 Neighbourhoods by Average Number of Reviews Per Listing",
+       x = "Neighborhood",
+       y = "Average Number of Reviews Per Listing",
+       fill = "Avg Reviews") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 12, color = theme_colors$text),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")
+
+```
+```{r locations_by_avg_num_of_monthly_reviews}
+
+top10_neighbourhoods_by_avg_num_of_monthly_reviews <- df |>
+  filter(!is.na(reviews_per_month)) |>
+  group_by(neighbourhood_cleansed) |>
+  summarize(avg_monthly_reviews = round(mean(reviews_per_month), 2)) |>
+  arrange(desc(avg_monthly_reviews)) |>
+  head(10)  
+
+top10_neighbourhoods_by_avg_num_of_monthly_reviews
+
+p3 <- top10_neighbourhoods_by_avg_num_of_monthly_reviews |>
+  ggplot(aes(x = reorder(neighbourhood_cleansed, avg_monthly_reviews), 
+                              y = avg_monthly_reviews, 
+                              fill = avg_monthly_reviews)) +
+  geom_bar(stat = "identity", 
+           alpha = 0.8, color = "white", 
+           linewidth = 0.5) +
+  geom_text(aes(label = avg_monthly_reviews),
+            position = position_stack(vjust = 0.9), size = 4) +
+  coord_flip() +
+  scale_fill_gradient(low = theme_colors$light, 
+                      high = theme_colors$dark) +
+  labs(title = "Top 10 Neighbourhoods by Average Number of Monthly Reviews Per Listing",
+       x = "Neighborhood",
+       y = "Average Number of Monthly Reviews Per Listing",
+       fill = "Avg Monthly Reviews") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 12, color = theme_colors$text),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")
+
+```
+
+
+```{r location_scores}
+top10_neighbourhoods_by_location_scores <- df |>
+  filter(!is.na(review_scores_location)) |>
+  group_by(neighbourhood_cleansed) |>
+  summarize(
+    n = n(),
+    avg_location_score = round(mean(review_scores_location), 2)) |>
+  arrange(desc(avg_location_score)) |>
+  filter(n >= 30) |>
+  head(10)
+  
+top10_neighbourhoods_by_location_scores
+
+p4 <- top10_neighbourhoods_by_location_scores |>
+  ggplot(aes(x = reorder(neighbourhood_cleansed, avg_location_score), 
+                              y = avg_location_score, 
+                              fill = avg_location_score)) +
+  geom_bar(stat = "identity", 
+           alpha = 0.8, color = "white", 
+           linewidth = 0.5) +
+  geom_text(aes(label = avg_location_score),
+            position = position_stack(vjust = 0.9), size = 4) +
+  coord_flip() +
+  scale_fill_gradient(low = theme_colors$light, 
+                      high = theme_colors$dark) +
+  labs(title = "Top 10 Neighbourhoods by Average Location Score",
+       x = "Neighborhood",
+       y = "Average Location Score",
+       fill = "Avg Location Score") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 12, color = theme_colors$text),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")
+```
+```{r plot_location_distributions, fig.width=15, fig.height=20}
+grid.arrange(p1, p2, p3, p4, ncol = 1)
+```
+
+## 4.3 Property Type and Amenities
+
+```{r property_and_amenities, fig.width=15}
+# Property type and number of amenities
+
+property_amenities <- df |>
+  select(property_type, amenity_count, review_scores_value) |>
+  filter(!is.na(review_scores_value)) |>
+  group_by(property_type) |>
+  summarize(
+    num_listings = n(),
+    avg_num_amenities = round(mean(amenity_count), 0),
+    avg_review_score_val = round(mean(review_scores_value), 2)
+  ) |>
+  filter(num_listings >= 50)
+    
+property_amenities
+
+property_amenities_plot <-
+  ggplot(property_amenities, 
+         aes(x = reorder(property_type, -avg_review_score_val), 
+             y = avg_num_amenities, 
+             fill = avg_review_score_val)) +
+  geom_col(width = 0.8, 
+           color = "white", 
+           linewidth = 0.5) + 
+  geom_text(aes(label = avg_num_amenities),
+            position = position_stack(vjust = 0.9), 
+            size = 4) +
+  scale_fill_gradient(low = theme_colors$light, 
+                      high = theme_colors$dark) +
+  labs(title = "Property Types by Average Amenity Count and Average Review Score Value",
+       x = "Property Type", 
+       y = "Amenity Count",
+       fill = "Average Review Score Value") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        axis.text.x = element_text(angle = 15, hjust = 1),
+        panel.grid.minor = element_blank())
+
+property_amenities_plot
+```
+
+
+ 
+
+
+# 5. Price and Revenue Analysis
+
+## 5.1 Univariate Analysis - Price Distribution
+
+```{r price_distribution}
+# Price distribution analysis
+p1 <- df |>
+  filter(!is.na(price_clean)) |>
+  ggplot(aes(x = price_clean)) +
+  geom_histogram(bins = 80, fill = theme_colors$primary, alpha = 0.7, 
+                 color = "white", linewidth = 0.3) +
+  scale_x_continuous(labels = dollar_format(), 
+                     breaks = seq(0, 1000, 100),
+                     limits = c(0, 500)) +
+  labs(title = "Price Distribution (Limited to $500 for Clarity)",
+       x = "Price per Night ($)",
+       y = "Frequency",
+       subtitle = paste("Mean: $", round(mean(df$price_clean, na.rm = TRUE), 2),
+                       "| Median: $", round(median(df$price_clean, na.rm = TRUE), 2))) +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        plot.subtitle = element_text(color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+p2 <- df |>
+  filter(!is.na(price_clean)) |>
+  ggplot(aes(y = price_clean, x = "")) +
+  geom_violin(fill = theme_colors$secondary, alpha = 0.6, color = theme_colors$dark) +
+  geom_boxplot(width = 0.2, fill = theme_colors$accent, alpha = 0.8, 
+               outlier.alpha = 0.3, outlier.size = 0.5) +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 400)) +
+  labs(title = "Price Distribution (Violin Plot)",
+       y = "Price per Night ($)",
+       x = "") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        axis.text.x = element_blank(),
+        panel.grid.minor = element_blank())
+
+p3 <- df |>
+  filter(!is.na(price_category)) |>
+  count(price_category) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = price_category, y = pct, fill = price_category)) +
+  geom_bar(stat = "identity", alpha = 0.8, color = "white", linewidth = 0.5) +
+  scale_fill_manual(values = c("Budget" = theme_colors$light,
+                               "Economy" = theme_colors$primary,
+                               "Mid-range" = theme_colors$secondary,
+                               "Premium" = theme_colors$accent,
+                               "Luxury" = theme_colors$dark)) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")), 
+            vjust = -0.5, fontface = "bold", color = theme_colors$text) +
+  labs(title = "Price Category Distribution",
+       x = "Price Category",
+       y = "Percentage (%)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "none",
+        panel.grid.minor = element_blank())
+
+plot_price <- grid.arrange(p1, p2, p3, ncol = 3, widths = c(1.2, 0.8, 1))
+print(plot_price)
+
+```
+ 
+Overall, the pricing analysis suggests that Boston’s short-term rental market is characterized by a wide variety of offerings, ranging from affordable units to high-end luxury stays. This variability supports the use of clustering methods in later sections, as distinct pricing tiers likely reflect meaningful differences in property characteristics and host strategies.
+
+## 5.2 Bivariate Analysis - Price vs Key Variables
+
+```{r price_bivariate}
+# Price by room type
+p1 <- df |>
+  filter(!is.na(price_clean), !is.na(room_type)) |>
+  ggplot(aes(x = room_type, y = price_clean, fill = room_type)) +
+  geom_violin(alpha = 0.6, color = theme_colors$dark) +
+  geom_boxplot(width = 0.2, alpha = 0.8, outlier.alpha = 0.2, outlier.size = 0.3) +
+  scale_fill_manual(values = c("Entire home/apt" = theme_colors$primary,
+                               "Private room" = theme_colors$secondary,
+                               "Shared room" = theme_colors$accent)) +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 400)) +
+  labs(title = "Price Distribution by Room Type",
+       x = "Room Type",
+       y = "Price per Night ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1),
+        panel.grid.minor = element_blank())
+
+# Price by accommodates
+p2 <- df |>
+  filter(!is.na(price_clean), !is.na(accommodates), accommodates <= 8) |>
+  group_by(accommodates) |>
+  summarise(
+    mean_price = mean(price_clean, na.rm = TRUE),
+    median_price = median(price_clean, na.rm = TRUE),
+    n = n()
+  ) |>
+  ggplot(aes(x = accommodates, y = mean_price)) +
+  geom_line(color = theme_colors$primary, linewidth = 1.5, alpha = 0.8) +
+  geom_point(aes(size = n), color = theme_colors$accent, alpha = 0.7) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_size_continuous(range = c(2, 8), name = "Listings") +
+  labs(title = "Average Price by Accommodation Capacity",
+       x = "Number of Guests",
+       y = "Average Price ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+# Price by bedrooms
+p3 <- df |>
+  filter(!is.na(price_clean), !is.na(bedrooms), bedrooms <= 5) |>
+  group_by(bedrooms) |>
+  summarise(
+    mean_price = mean(price_clean, na.rm = TRUE),
+    median_price = median(price_clean, na.rm = TRUE),
+    n = n()
+  ) |>
+  ggplot(aes(x = bedrooms, y = mean_price)) +
+  geom_col(fill = theme_colors$secondary, alpha = 0.8, color = "white", linewidth = 0.5) +
+  geom_text(aes(label = dollar(round(mean_price, 0))), 
+            vjust = -0.5, fontface = "bold", color = theme_colors$text) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Average Price by Number of Bedrooms",
+       x = "Number of Bedrooms",
+       y = "Average Price ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+plot_price_2 <- grid.arrange(p1, p2, p3, ncol = 3)
+print(plot_price_2)
+```
+
+
+* **Room type** strongly segments the market into budget (shared rooms), mid-range (private rooms), and high-value (entire homes) categories.
+* **Accommodation capacity** drives prices upward, particularly for large-group listings, which form a small but highly priced niche.
+* **Bedroom count** is closely associated with price increases, reinforcing its role as a key structural determinant of listing value.
+
+
+## 5.3 Detailed Interactive Map with Revenue Analysis
+
+```{r interactive_map}
+# Create interactive map with revenue analysis
+df_map_detailed <- df_map |>
+  filter(!is.na(price_clean), !is.na(revenue_l365d)) |>
+  sample_n(min(2000, nrow(df_map)))
+
+# Color palette for revenue
+revenue_pal <- colorNumeric(
+  palette = colorRampPalette(c(theme_colors$light, theme_colors$primary, 
+                               theme_colors$accent, theme_colors$dark))(100),
+  domain = df_map_detailed$revenue_l365d
+)
+
+# Create detailed map with neighbourhood boundaries
+map_revenue <- leaflet() |>
+  addProviderTiles(providers$CartoDB.Positron, options = providerTileOptions(opacity = 0.9)) |>
+  addPolygons(
+    data = neighbourhoods_geo,
+    fillColor = "transparent",
+    fillOpacity = 0,
+    color = theme_colors$text,
+    weight = 1.5,
+    opacity = 0.6,
+    label = ~neighbourhood,
+    labelOptions = labelOptions(noHide = FALSE, textOnly = FALSE)
+  ) |>
+  addCircleMarkers(
+    data = df_map_detailed,
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = ~sqrt(revenue_l365d / 5000),
+    color = ~revenue_pal(revenue_l365d),
+    fillColor = ~revenue_pal(revenue_l365d),
+    fillOpacity = 0.7,
+    stroke = TRUE,
+    weight = 0.5,
+    popup = ~paste(
+      "<b>Price:</b> $", round(price_clean, 0), "<br>",
+      "<b>Annual Revenue:</b> $", round(revenue_l365d, 0), "<br>",
+      "<b>Room Type:</b>", room_type, "<br>",
+      "<b>Occupancy Rate:</b>", round(occupancy_rate * 100, 1), "%", "<br>",
+      "<b>Neighbourhood:</b>", neighbourhood_cleansed, "<br>",
+      "<b>Rating:</b>", round(review_scores_rating, 1), "/5.0"
+    ),
+    clusterOptions = markerClusterOptions(
+      spiderfyOnMaxZoom = TRUE,
+      showCoverageOnHover = TRUE,
+      zoomToBoundsOnClick = TRUE
+    )
+  )# |>
+  # leaflet::addLegend(
+  #   "bottomright",
+  #   pal = revenue_pal,
+  #   values = df_map_detailed$revenue_l365d,
+  #   title = "Annual Revenue ($)",
+  #   opacity = 0.8,
+  #   labFormat = labelFormat(prefix = "$", big.mark = ",")
+  # )
+
+map_revenue
+```
+
+
+
+## 5.4 Revenue Optimization Analysis
+
+```{r revenue_analysis}
+# Analyze revenue drivers
+revenue_analysis <- df |>
+  filter(!is.na(revenue_l365d), !is.na(price_clean), revenue_l365d > 0) |>
+  mutate(
+    price_bucket = cut(price_clean, 
+                      breaks = quantile(price_clean, probs = seq(0, 1, 0.2), na.rm = TRUE),
+                      include.lowest = TRUE,
+                      labels = c("Q1", "Q2", "Q3", "Q4", "Q5")),
+    occupancy_bucket = cut(occupancy_rate,
+                          breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1),
+                          include.lowest = TRUE,
+                          labels = c("0-20%", "20-40%", "40-60%", "60-80%", "80-100%"))
+  )
+
+# Revenue by price and occupancy
+revenue_summary <- revenue_analysis |>
+  group_by(price_bucket, occupancy_bucket) |>
+  summarise(
+    avg_revenue = mean(revenue_l365d, na.rm = TRUE),
+    median_revenue = median(revenue_l365d, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  filter(n >= 10)
+
+p1 <- ggplot(revenue_summary, 
+             aes(x = price_bucket, y = occupancy_bucket, fill = avg_revenue)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = theme_colors$light, high = theme_colors$dark,
+                     labels = dollar_format()) +
+  labs(title = "Average Annual Revenue Heatmap",
+       x = "Price Quintile",
+       y = "Occupancy Rate",
+       fill = "Revenue ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid = element_blank())
+
+print(p1)
+
+# Optimal pricing analysis
+optimal_pricing <- revenue_analysis |>
+  filter(occupancy_rate >= 0.5) |>
+  group_by(price_category) |>
+  summarise(
+    avg_revenue = mean(revenue_l365d, na.rm = TRUE),
+    avg_occupancy = mean(occupancy_rate, na.rm = TRUE) * 100,
+    avg_price = mean(price_clean, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  arrange(desc(avg_revenue))
+
+cat("\n=== REVENUE BY PRICE CATEGORY (50%+ Occupancy) ===\n")
+print(optimal_pricing)
+```
+
+
+## 5.5 Neighbourhood Analysis
+
+```{r neighbourhood_analysis}
+# Analyze by neighbourhood
+neighborhood_stats <- df |>
+  filter(!is.na(neighbourhood_cleansed), !is.na(price_clean)) |>
+  group_by(neighbourhood_cleansed) |>
+  summarise(
+    n_listings = n(),
+    mean_price = mean(price_clean, na.rm = TRUE),
+    median_price = median(price_clean, na.rm = TRUE),
+    mean_rating = mean(review_scores_rating, na.rm = TRUE),
+    mean_revenue = mean(revenue_l365d, na.rm = TRUE),
+    mean_occupancy = mean(occupancy_rate, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_listings)) |>
+  head(20)
+
+# Visualize top neighborhoods
+p1 <- neighborhood_stats |>
+  head(15) |>
+  mutate(neighbourhood = factor(neighbourhood_cleansed, 
+                               levels = rev(neighbourhood_cleansed))) |>
+  ggplot(aes(x = neighbourhood, y = mean_price, fill = n_listings)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  scale_fill_gradient(low = theme_colors$light, high = theme_colors$dark, 
+                     name = "Listings") +
+  coord_flip() +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Average Price by Top 15 Neighbourhoods",
+       x = "Neighbourhood",
+       y = "Average Price ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+p2 <- neighborhood_stats |>
+  head(15) |>
+  mutate(neighbourhood = factor(neighbourhood_cleansed,
+                               levels = rev(neighbourhood_cleansed))) |>
+  ggplot(aes(x = neighbourhood, y = mean_revenue, fill = mean_occupancy)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  scale_fill_gradient(low = theme_colors$light, high = theme_colors$dark,
+                     labels = percent_format(), name = "Occupancy") +
+  coord_flip() +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Average Annual Revenue by Top 15 Neighbourhoods",
+       x = "Neighbourhood",
+       y = "Average Revenue ($)") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+neighbourhood_plot <- grid.arrange(p1, p2, ncol = 2)
+
+print(neighbourhood_plot)
+```
+
+
+## 5.6 Marginal Revenue per Additional Amenity
+
+```{r test}
+# Basic cleaning & derived columns
+df2 <- df |>
+  mutate(
+    revenue = as.numeric(revenue_l365d),
+    price = as.numeric(price_clean),
+    occupancy = as.numeric(occupancy_rate),
+    avg_review = as.numeric(avg_review_score),      # or review_scores_rating
+    beds = as.numeric(beds),
+    bedrooms = as.numeric(bedrooms),
+    price_per_person = as.numeric(price_per_person),
+    revenue_per_bed = as.numeric(revenue_per_bed),
+    has_wifi = if_else(has_wifi %in% c(TRUE, "t", "TRUE", 1), 1, 0),
+    host_experience_years = as.numeric(host_experience_years)
+  ) |>
+  # remove impossible / NA revenues and coordinates outside expected range
+  filter(!is.na(revenue) & revenue >= 0)
+
+glimpse(df2 |> select(revenue, price, occupancy, beds, bedrooms, avg_review, revenue_per_bed))
+
+summary_stats <- df2 |>
+  summarize(
+    n = n(),
+    mean_revenue = mean(revenue, na.rm=TRUE),
+    median_revenue = median(revenue, na.rm=TRUE),
+    sd_revenue = sd(revenue, na.rm=TRUE),
+    p5 = quantile(revenue, .05, na.rm=TRUE),
+    p25 = quantile(revenue, .25, na.rm=TRUE),
+    p75 = quantile(revenue, .75, na.rm=TRUE),
+    p95 = quantile(revenue, .95, na.rm=TRUE),
+    max_revenue = max(revenue, na.rm=TRUE)
+  )
+print(summary_stats)
+```
+
+```{r eff}
+r_am_roi <- df |>
+  filter(!is.na(revenue_l365d), !is.na(amenity_count),
+         revenue_l365d <= 250000, amenity_count <= 40) |>
+  group_by(amenity_count) |>
+  summarise(
+    mean_rev = mean(revenue_l365d, na.rm = TRUE),
+    n = n()
+  ) |>
+  mutate(
+    marginal_rev = mean_rev - lag(mean_rev)
+  ) |>
+  ggplot(aes(x = amenity_count, y = marginal_rev)) +
+  geom_col(fill = theme_colors$accent, alpha = 0.8) +
+  geom_hline(yintercept = 0, color = theme_colors$dark, linewidth = 0.6) +
+  labs(
+    title = "Marginal Revenue per Additional Amenity",
+    x = "Amenity Count",
+    y = "Marginal Revenue Change ($)"
+  ) +
+  theme_transparent()
+
+r_am_roi
+```
+
+
+## 5.7 Revenue Surface: Interaction of Price and Occupancy
+
+```{r rev_heatmap}
+df_rev_surface <- df |>
+  filter(!is.na(price_clean), !is.na(occupancy_rate),
+         !is.na(revenue_l365d), revenue_l365d <= 250000) |>
+  mutate(
+    price_bin = cut(price_clean, breaks = seq(0, 600, 50), include.lowest = TRUE),
+    occ_bin = cut(occupancy_rate, breaks = seq(0, 1, 0.1), include.lowest = TRUE)
+  ) |>
+  group_by(price_bin, occ_bin) |>
+  summarise(mean_rev = mean(revenue_l365d, na.rm = TRUE)) |> 
+  ungroup()
+
+r_heat <- df_rev_surface |>
+  ggplot(aes(x = price_bin, y = occ_bin, fill = mean_rev)) +
+  geom_tile() +
+  scale_fill_gradient(low = theme_colors$light, high = theme_colors$dark,
+                      labels = dollar_format()) +
+  labs(
+    title = "Revenue Surface: Interaction of Price and Occupancy",
+    x = "Price per Night (Binned)",
+    y = "Occupancy Rate (Binned)",
+    fill = "Mean Revenue"
+  ) +
+  theme_transparent() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+r_heat
+```
+
+
+## 5.8 Revenue Elasticity
+
+```{r}
+# ------- PRICE ELASTICITY -------
+
+df_el <- df |>
+  filter(
+    !is.na(price_clean),
+    !is.na(revenue_l365d),
+    is.finite(price_clean),
+    is.finite(revenue_l365d),
+    revenue_l365d <= 250000,
+    revenue_l365d > 0,
+    price_clean > 0,
+    price_clean <= 5000
+  )
+
+# GAM on log-log scale
+gam_price <- gam(log(revenue_l365d) ~ s(log(price_clean)), data = df_el)
+
+# Grid over log(price)
+lp_seq <- seq(
+  from = log(min(df_el$price_clean, na.rm = TRUE)),
+  to   = log(max(df_el$price_clean, na.rm = TRUE)),
+  length.out = 300
+)
+
+grid_price <- data.frame(price_clean = exp(lp_seq))
+
+# Fitted smooth on link scale (log revenue)
+f_hat <- predict(gam_price, newdata = grid_price, type = "link")
+
+# Central finite differences: d log(rev) / d log(price)
+n <- length(lp_seq)
+deriv_lp <- rep(NA_real_, n)
+deriv_lp[2:(n - 1)] <- (f_hat[3:n] - f_hat[1:(n - 2)]) / (lp_seq[3:n] - lp_seq[1:(n - 2)])
+
+elasticity_price <- tibble(
+  price      = grid_price$price_clean,
+  elasticity = deriv_lp
+)
+
+r_el_price <- elasticity_price |>
+  ggplot(aes(x = price, y = elasticity)) +
+  geom_line(color = theme_colors$primary, linewidth = 1.4) +
+  geom_hline(yintercept = 0, color = theme_colors$dark) +
+  labs(
+    title = "Price Elasticity of Annual Revenue",
+    subtitle = "Elasticity ≈ d log(Revenue) / d log(Price)",
+    x = "Price ($)",
+    y = "Elasticity"
+  ) +
+  theme_transparent()
+
+
+# ------- OCCUPANCY ELASTICITY -------
+
+df_el_occ <- df |>
+  filter(
+    !is.na(occupancy_rate),
+    !is.na(revenue_l365d),
+    revenue_l365d <= 250000,
+    revenue_l365d > 0,
+    occupancy_rate > 0,
+    occupancy_rate < 1
+  )
+
+gam_occ <- gam(log(revenue_l365d) ~ s(log(occupancy_rate)), data = df_el_occ)
+
+lo_seq <- seq(
+  from = log(min(df_el_occ$occupancy_rate, na.rm = TRUE)),
+  to   = log(max(df_el_occ$occupancy_rate, na.rm = TRUE)),
+  length.out = 300
+)
+
+grid_occ <- data.frame(occupancy_rate = exp(lo_seq))
+
+g_hat <- predict(gam_occ, newdata = grid_occ, type = "link")
+
+n2 <- length(lo_seq)
+deriv_lo <- rep(NA_real_, n2)
+deriv_lo[2:(n2 - 1)] <- (g_hat[3:n2] - g_hat[1:(n2 - 2)]) / (lo_seq[3:n2] - lo_seq[1:(n2 - 2)])
+
+elasticity_occ <- tibble(
+  occ        = grid_occ$occupancy_rate,
+  elasticity = deriv_lo
+)
+
+r_el_occ <- elasticity_occ |>
+  ggplot(aes(x = occ, y = elasticity)) +
+  geom_line(color = theme_colors$accent, linewidth = 1.4) +
+  geom_hline(yintercept = 0, color = theme_colors$dark) +
+  labs(
+    title = "Occupancy Elasticity of Annual Revenue",
+    subtitle = "Elasticity ≈ d log(Revenue) / d log(Occupancy)",
+    x = "Occupancy rate",
+    y = "Elasticity"
+  ) +
+  theme_transparent()
+
+# Show both plots
+grid.arrange(r_el_price, r_el_occ, ncol = 2)
+
+
+
+```
+
+
+
+## 5.9 Revenue Misc
+
+```{r rev test setup}
+# ---------- Global cleaning & derived columns ----------
+df_clean <- df |>
+  mutate(
+    revenue = as.numeric(revenue_l365d),
+    price = as.numeric(price_clean),
+    occupancy = as.numeric(occupancy_rate),
+    avg_review = coalesce(as.numeric(avg_review_score), as.numeric(review_scores_rating)),
+    beds = as.numeric(beds),
+    bedrooms = as.numeric(bedrooms),
+    amenity_count = as.numeric(amenity_count),
+    host_years = as.numeric(host_experience_years),
+    is_superhost = as.integer(host_is_superhost_bool),
+    listings_owned = as.numeric(calculated_host_listings_count),
+    listing_eff = as.numeric(listing_efficiency)
+  ) |>
+  # remove obviously bad coords / values and keep reasonable ranges
+  filter(is.finite(revenue), is.finite(price), is.finite(occupancy)) |>
+  filter(revenue >= 0, price > 0, occupancy >= 0, occupancy <= 1) |>
+  # cap extreme revenues for stability (keeps original for reporting if needed)
+  mutate(revenue_capped = pmin(revenue, 250000))
+
+# A quick summary
+df_clean |> summarise(n = n(), mean_rev = mean(revenue), median_rev = median(revenue), p95 = quantile(revenue, .95))
+
+# ---------- Helpers ----------
+# backtransform function (for log models)
+inv_log10 <- function(x) 10^x - 1
+```
+
+```{r rev test}
+minn_df <- df_clean |>
+  filter(minimum_nights <= 30) |>
+  group_by(minimum_nights) |>
+  summarise(mean_occ = mean(occupancy, na.rm=TRUE), mean_rev = mean(revenue, na.rm=TRUE), n = n())
+
+p_min <- ggplot(minn_df, aes(x = minimum_nights, y = mean_rev)) +
+  geom_line(color = theme_colors$primary, size=1.2) +
+  geom_point() + scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Mean Revenue vs Minimum Nights", x = "Minimum Nights", y = "Mean Revenue ($)") +
+  theme_transparent()
+p_min
+
+df_eff <- df_clean |>
+  filter(availability_365 >= 0 & availability_365 <= 365 & price <= 5000) |>
+  mutate(avail_nights = 365 - availability_365,
+         rev_per_avail = ifelse(avail_nights > 0, revenue / avail_nights, NA))
+
+# Plot efficiency vs price
+p_eff <- ggplot(df_eff |> filter(!is.na(rev_per_avail) & rev_per_avail < 2000), aes(x = price, y = rev_per_avail)) +
+  geom_point(alpha = 0.25) + geom_smooth(method="loess", se=FALSE, color = theme_colors$accent) +
+  labs(title = "Revenue per Available Night vs Price", x = "Price ($)", y = "Revenue / Available Night ($)") +
+  theme_transparent()
+p_eff
+
+# Model with host features
+df_host <- df_clean |> filter(revenue > 0 & revenue <= 250000)
+host_mod <- lm(log10(revenue) ~ host_years + is_superhost + host_response_rate_num + listings_owned + avg_review, data = df_host)
+summary(host_mod)
+
+# Simple visual
+p_host <- df_host |> filter(host_years <= 20) |>
+  ggplot(aes(x = host_years, y = revenue)) +
+  geom_point(alpha=0.2) + geom_smooth(method="loess", se=FALSE, color = theme_colors$secondary) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Revenue vs Host Experience (years)") +
+  theme_transparent()
+p_host
+
+nb_summary <- df_clean |>
+  group_by(neighbourhood_cleansed) |>
+  summarise(nb_median = median(revenue, na.rm=TRUE), n = n())
+
+bench <- df_clean |> left_join(nb_summary, by = "neighbourhood_cleansed") |>
+  mutate(rel_to_nb = revenue / nb_median) |>
+  arrange(neighbourhood_cleansed, desc(rel_to_nb)) 
+
+# Underperformers: rel_to_nb < 0.6 in neighborhoods with n >= 10
+underperf <- bench |> filter(n >= 10, rel_to_nb < 0.6)
+underperf |> select(id, neighbourhood_cleansed, revenue, nb_median, rel_to_nb) |> head(20)
+
+sup_demand <- df_clean |>
+  group_by(neighbourhood_cleansed) |>
+  summarise(median_price = median(price, na.rm=TRUE),
+            median_occ = median(occupancy, na.rm=TRUE),
+            n = n()) |>
+  mutate(supply_demand_index = median_price * median_occ) |>
+  arrange(desc(supply_demand_index))
+
+head(sup_demand, 15)
+```
+
+* If revenue falls as minimum_nights increases, recommend lowering minimum nights to increase bookings.
+* If revenue increases with minimum nights (and occupancy doesn’t drop too much), longer minimums may be beneficial for host stability.
+
+* Low rev_per_avail suggests either low price, low occupancy, or both — investigate listings with good location but low efficiency.
+* Recommend: improve photos, reviews, adjust price, add amenity investments.
+
+# 6. Clustering Analysis
+
+```{r clustering_prep}
+# Prepare data for clustering
+clustering_data <- df |>
+  filter(
+    !is.na(price_clean),
+    !is.na(latitude),
+    !is.na(longitude),
+    !is.na(accommodates),
+    !is.na(bedrooms),
+    !is.na(review_scores_rating),
+    !is.na(revenue_l365d)
+  ) |>
+  mutate(
+    # Normalize key features for clustering
+    price_scaled = scale(price_clean)[,1],
+    revenue_scaled = scale(revenue_l365d)[,1],
+    rating_scaled = scale(review_scores_rating)[,1],
+    accommodates_scaled = scale(accommodates)[,1],
+    latitude_scaled = scale(latitude)[,1],
+    longitude_scaled = scale(longitude)[,1],
+    occupancy_scaled = scale(occupancy_rate)[,1],
+    amenity_scaled = scale(premium_amenity_score)[,1]
+  ) |>
+  select(id, price_clean, revenue_l365d, review_scores_rating, accommodates,
+         bedrooms, latitude, longitude, occupancy_rate, premium_amenity_score,
+         room_type, neighbourhood_cleansed,
+         price_scaled, revenue_scaled, rating_scaled, accommodates_scaled,
+         latitude_scaled, longitude_scaled, occupancy_scaled, amenity_scaled)
+
+cat("Prepared", nrow(clustering_data), "observations for clustering\n")
+cat("Features selected:", 
+    paste(c("Price", "Revenue", "Rating", "Capacity", "Location", 
+            "Occupancy", "Amenities"), collapse = ", "), "\n")
+```
+
+```{r optimal_clusters}
+# Select features for clustering
+cluster_features <- clustering_data |>
+  select(price_scaled, revenue_scaled, rating_scaled, 
+         accommodates_scaled, occupancy_scaled, amenity_scaled)
+
+# Method 1: Elbow method
+set.seed(123)
+wss <- map_dbl(1:10, function(k) {
+  kmeans(cluster_features, centers = k, nstart = 25, iter.max = 50)$tot.withinss
+})
+
+elbow_df <- data.frame(k = 1:10, wss = wss)
+
+p1 <- ggplot(elbow_df, aes(x = k, y = wss)) +
+  geom_line(color = theme_colors$primary, linewidth = 1.2) +
+  geom_point(color = theme_colors$accent, size = 3) +
+  scale_x_continuous(breaks = 1:10) +
+  labs(title = "Elbow Method for Optimal Clusters",
+       x = "Number of Clusters (k)",
+       y = "Within Sum of Squares",
+       subtitle = "Look for the 'elbow' in the curve") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+# Method 2: Silhouette method
+silhouette_scores <- map_dbl(2:10, function(k) {
+  km <- kmeans(cluster_features, centers = k, nstart = 25, iter.max = 50)
+  ss <- silhouette(km$cluster, dist(cluster_features))
+  mean(ss[, 3])
+})
+
+sil_df <- data.frame(k = 2:10, silhouette = silhouette_scores)
+
+p2 <- ggplot(sil_df, aes(x = k, y = silhouette)) +
+  geom_line(color = theme_colors$secondary, linewidth = 1.2) +
+  geom_point(color = theme_colors$accent, size = 3) +
+  scale_x_continuous(breaks = 2:10) +
+  labs(title = "Silhouette Method for Optimal Clusters",
+       x = "Number of Clusters (k)",
+       y = "Average Silhouette Width",
+       subtitle = "Higher values indicate better clustering") +
+  theme_transparent() +
+  theme(plot.title = element_text(face = "bold", size = 14, color = theme_colors$text),
+        panel.grid.minor = element_blank())
+
+cluster_plot <-grid.arrange(p1, p2, ncol = 2)
+print(cluster_plot)
+
+# Determine optimal k
+optimal_k <- sil_df$k[which.max(sil_df$silhouette)]
+cat("\n=== OPTIMAL NUMBER OF CLUSTERS ===\n")
+cat("Based on silhouette method: k =", optimal_k, "\n")
+cat("Average silhouette width:", round(max(sil_df$silhouette), 3), "\n")
+```
+
+## K-Means Clustering
+
+```{r kmeans_clustering}
+# Perform K-means clustering with optimal k
+set.seed(123)
+kmeans_result <- kmeans(cluster_features, centers = optimal_k, nstart = 50, iter.max = 100)
+
+# Add cluster assignments
+clustering_data$cluster <- as.factor(kmeans_result$cluster)
+
+cat("=== CLUSTER ASSIGNMENTS ===\n")
+print(table(clustering_data$cluster))
+
+# Prepare data for geographic cluster visualization
+df_clustered_geo <- df |>
+  left_join(
+    clustering_data |> select(id, cluster),
+    by = "id"
+  ) |>
+  filter(!is.na(cluster), !is.na(latitude), !is.na(longitude),
+         latitude > 42.2 & latitude < 42.4,
+         longitude > -71.2 & longitude < -70.9)
+
+# Sample for performance
+df_clustered_geo_sample <- df_clustered_geo |>
+  sample_n(min(2000, nrow(df_clustered_geo)))
+
+# Create distinct cluster color palette - using high contrast, easily distinguishable colors
+# Define colors for each cluster (1-5)
+cluster_colors_list <- c("#3498db", "#2ecc71", "#f39c12", "#e74c3c", "#9b59b6")
+names(cluster_colors_list) <- as.character(1:5)
+
+# Ensure cluster is character for consistent color mapping
+df_clustered_geo_sample$cluster_char <- as.character(df_clustered_geo_sample$cluster)
+
+# Create cluster color palette with all possible cluster values
+all_clusters <- sort(unique(df_clustered_geo_sample$cluster_char))
+cluster_pal <- colorFactor(
+  palette = cluster_colors_list[all_clusters],
+  domain = all_clusters
+)
+
+# Visualize clusters on geographic map - WITHOUT clustering to show individual colors
+map_clusters_geo <- leaflet() |>
+  addProviderTiles(providers$CartoDB.Positron, options = providerTileOptions(opacity = 0.9)) |>
+  addPolygons(
+    data = neighbourhoods_geo,
+    fillColor = "transparent",
+    fillOpacity = 0,
+    color = theme_colors$text,
+    weight = 1.5,
+    opacity = 0.6,
+    label = ~neighbourhood,
+    labelOptions = labelOptions(noHide = FALSE, textOnly = FALSE)
+  ) |>
+  addCircleMarkers(
+    data = df_clustered_geo_sample,
+    lng = ~longitude,
+    lat = ~latitude,
+    radius = 5,
+    color = "white",
+    fillColor = ~cluster_pal(cluster_char),
+    fillOpacity = 0.8,
+    stroke = TRUE,
+    weight = 1.5,
+    popup = ~paste(
+      "<b>Cluster:</b>", cluster, "<br>",
+      "<b>Price:</b> $", round(price_clean, 0), "<br>",
+      "<b>Revenue:</b> $", round(revenue_l365d, 0), "<br>",
+      "<b>Rating:</b>", round(review_scores_rating, 1), "/5.0", "<br>",
+      "<b>Neighbourhood:</b>", neighbourhood_cleansed, "<br>",
+      "<b>Room Type:</b>", room_type, "<br>",
+      "<b>Occupancy:</b>", round(occupancy_rate * 100, 1), "%"
+    )
+  ) |>
+  leaflet::addLegend(
+    "bottomright",
+    pal = cluster_pal,
+    values = all_clusters,
+    title = paste("Cluster (k =", optimal_k, ")"),
+    opacity = 0.9
+  )
+
+print(map_clusters_geo)
+```
+
+## Cluster Characterization
+
+```{r cluster_characterization}
+
+# Analyze cluster characteristics using ALL relevant features
+cluster_profiles <- clustering_data |>
+  group_by(cluster) |>
+  summarise(
+    n   = n(),
+    pct = round(n / nrow(clustering_data) * 100, 1),
+
+    # --- RAW FEATURES ---
+    avg_price        = mean(price_clean, na.rm = TRUE),
+    median_price     = median(price_clean, na.rm = TRUE),
+    avg_revenue      = mean(revenue_l365d, na.rm = TRUE),
+    avg_rating       = mean(review_scores_rating, na.rm = TRUE),
+    avg_occupancy    = mean(occupancy_rate, na.rm = TRUE) * 100,   # as %
+    avg_accommodates = mean(accommodates, na.rm = TRUE),
+    avg_bedrooms     = mean(bedrooms, na.rm = TRUE),
+    avg_amenities    = mean(premium_amenity_score, na.rm = TRUE),
+    pct_entire_home  = mean(room_type == "Entire home/apt", na.rm = TRUE) * 100,
+
+    # --- RAW LOCATION ---
+    avg_latitude     = mean(latitude, na.rm = TRUE),
+    avg_longitude    = mean(longitude, na.rm = TRUE),
+
+    # --- SCALED FEATURES (CENTROIDS IN FEATURE SPACE) ---
+    price_scaled_mean        = mean(price_scaled, na.rm = TRUE),
+    revenue_scaled_mean      = mean(revenue_scaled, na.rm = TRUE),
+    rating_scaled_mean       = mean(rating_scaled, na.rm = TRUE),
+    accommodates_scaled_mean = mean(accommodates_scaled, na.rm = TRUE),
+    latitude_scaled_mean     = mean(latitude_scaled, na.rm = TRUE),
+    longitude_scaled_mean    = mean(longitude_scaled, na.rm = TRUE),
+    occupancy_scaled_mean    = mean(occupancy_scaled, na.rm = TRUE),
+    amenity_scaled_mean      = mean(amenity_scaled, na.rm = TRUE),
+
+    # --- DOMINANT CATEGORICAL FEATURES ---
+    main_room_type      = names(which.max(table(room_type))),
+
+    .groups = "drop"
+  ) |>
+  arrange(desc(avg_revenue))
+
+cat("=== CLUSTER PROFILES ===\n")
+print(
+  cluster_profiles |>
+    mutate(
+      avg_price     = round(avg_price, 2),
+      median_price  = round(median_price, 2),
+      avg_revenue   = round(avg_revenue, 0),
+      avg_rating    = round(avg_rating, 2),
+      avg_occupancy = round(avg_occupancy, 1),
+      avg_accommodates = round(avg_accommodates, 1),
+      avg_bedrooms  = round(avg_bedrooms, 1),
+      avg_amenities = round(avg_amenities, 1),
+      pct_entire_home = round(pct_entire_home, 1)
+    )
+)
+
+# Use the same cluster colors as the maps for consistency
+cluster_colors_plot <- c(
+  "1" = "#3498db",      # Bright Blue
+  "2" = "#2ecc71",      # Green
+  "3" = "#f39c12",      # Orange
+  "4" = "#e74c3c",      # Red
+  "5" = "#9b59b6"       # Purple
+)
+
+# Visualize key numeric characteristics (for the report)
+p1 <- cluster_profiles |>
+  select(cluster, avg_price, avg_revenue, avg_rating, avg_occupancy) |>
+  pivot_longer(cols = c(avg_price, avg_revenue, avg_rating, avg_occupancy),
+               names_to = "metric", values_to = "value") |>
+  mutate(
+    metric = metric |>
+      str_remove_all("avg_") |>
+      str_replace_all("_", " ") |>
+      str_to_title(),
+    cluster = as.character(cluster)
+  ) |>
+  ggplot(aes(x = cluster, y = value, fill = cluster)) +
+  geom_bar(stat = "identity", alpha = 0.8, position = "dodge") +
+  facet_wrap(~ metric, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = cluster_colors_plot) +
+  labs(title = "Cluster Characteristics Comparison",
+       x = "Cluster",
+       y = "Value",
+       fill = "Cluster") +
+  theme_transparent() +
+  theme(
+    plot.title   = element_text(face = "bold", size = 14, color = theme_colors$text),
+    legend.position = "none",
+    strip.text   = element_text(face = "bold")
+  )
+
+print(p1)
+
+# -------------------------
+# Name the clusters based on ALL characteristics
+# -------------------------
+
+cluster_names <- cluster_profiles |>
+  mutate(
+    cluster = as.integer(cluster),
+
+    # PRICE: uses price_scaled_mean (price_scaled) and avg_price
+    price_segment = case_when(
+      price_scaled_mean >=  1.0 ~ "Luxury",
+      price_scaled_mean >=  0.5 ~ "Upscale",
+      price_scaled_mean <= -1.0 ~ "Budget",
+      price_scaled_mean <= -0.5 ~ "Economy",
+      TRUE                      ~ "Mid-Priced"
+    ),
+
+    # REVENUE: uses revenue_scaled_mean
+    revenue_segment = case_when(
+      revenue_scaled_mean >=  0.8 ~ "High-Revenue",
+      revenue_scaled_mean <= -0.8 ~ "Low-Revenue",
+      TRUE                        ~ "Mid-Revenue"
+    ),
+
+    # RATING: uses rating_scaled_mean (review_scores_rating / rating_scaled)
+    rating_segment = case_when(
+      rating_scaled_mean >=  0.7 ~ "Top-Rated",
+      rating_scaled_mean <= -0.7 ~ "Lower-Rated",
+      TRUE                       ~ "Mid-Rated"
+    ),
+
+    # OCCUPANCY: uses occupancy_scaled_mean (occupancy_rate / occupancy_scaled)
+    occupancy_segment = case_when(
+      occupancy_scaled_mean >=  0.8 ~ "High-Occupancy",
+      occupancy_scaled_mean <= -0.8 ~ "Low-Occupancy",
+      TRUE                          ~ "Mid-Occupancy"
+    ),
+
+    # AMENITIES: uses amenity_scaled_mean (premium_amenity_score / amenity_scaled)
+    amenity_segment = case_when(
+      amenity_scaled_mean >=  0.6 ~ "Amenity-Rich",
+      amenity_scaled_mean <= -0.6 ~ "Amenity-Light",
+      TRUE                        ~ "Standard Amenities"
+    ),
+
+    # SIZE: uses accommodates, bedrooms, and accommodates_scaled
+    size_segment = case_when(
+      avg_accommodates >= 6 | avg_bedrooms >= 3 ~ "Large-Group",
+      avg_accommodates >= 3 | avg_bedrooms >= 2 ~ "Family-Sized",
+      TRUE                                      ~ "Compact"
+    ),
+
+
+    # FINAL HUMAN-READABLE LABEL
+    cluster_label = glue(
+      "{price_segment} {revenue_segment}, {rating_segment}, ",
+      "{occupancy_segment}, {amenity_segment} {size_segment} ",
+      "{main_room_type}"
+    )
+  ) |>
+  # If two clusters somehow get exactly the same label, disambiguate by cluster id
+  group_by(cluster_label) |>
+  mutate(
+    cluster_label = if_else(
+      n() > 1,
+      glue("{cluster_label} (Cluster {cluster})"),
+      cluster_label
+    )
+  ) |>
+  ungroup() |>
+  # Round some things for nicer printing
+  mutate(
+    avg_price        = round(avg_price, 2),
+    median_price     = round(median_price, 2),
+    avg_revenue      = round(avg_revenue, 0),
+    avg_rating       = round(avg_rating, 2),
+    avg_occupancy    = round(avg_occupancy, 1),
+    avg_accommodates = round(avg_accommodates, 1),
+    avg_bedrooms     = round(avg_bedrooms, 1),
+    avg_amenities    = round(avg_amenities, 1),
+    pct_entire_home  = round(pct_entire_home, 1)
+  ) |>
+  select(
+    cluster,
+    cluster_label,
+    n, pct,
+    avg_price, median_price, avg_revenue, avg_rating,
+    avg_occupancy, avg_accommodates, avg_bedrooms, avg_amenities,
+    pct_entire_home,
+    main_room_type
+  )
+
+cat("\n=== CLUSTER LABELS ===\n")
+print(cluster_names |> select(cluster, cluster_label, avg_price, avg_revenue))
+
+```
+| Original                                             | Cleaner Name                 |
+| ---------------------------------------------------- | ---------------------------- |
+| **Luxury High-Revenue Large-Group Hotel**            | **Luxury Hotel Cluster**     |
+| **Mid-Priced Amenity-Rich Large-Group Entire Homes** | **Amenity-Rich Large Homes** |
+| **Mid-Priced Compact Entire Homes**                  | **Standard Mid-Tier Homes**  |
+| **Lower-Rated Low-Occupancy Compact Homes**          | **Underperforming Units**    |
+| **Mid-Rated Low-Occupancy Compact Homes**            | **Low-Demand Homes**         |
+
+
+A small number of listings (n=14) have extremely high nightly prices (\$40–50k) and revenues exceeding \$300k–$2M annually. These represent luxury hotel penthouses and group suites. Because of their magnitude, k-means correctly isolates them into a separate cluster. We retain them to preserve meaningful segmentation, but acknowledge their outlier nature.
+
+```{r cluster names}
+cluster_names <- cluster_names |>
+  mutate(
+    cluster_name_short = case_when(
+      cluster == 3 ~ "Luxury Hotel Cluster",
+      cluster == 2 ~ "Amenity-Rich Large Homes",
+      cluster == 1 ~ "Standard Mid-Tier Homes",
+      cluster == 5 ~ "Underperforming Units",
+      cluster == 4 ~ "Low-Demand Homes",
+      TRUE         ~ as.character(cluster_label)
+    )
+  )
+cluster_names
+```
+
+## Geographic Distribution of Clusters
+
+```{r cluster_geography, fig.width=14, fig.height=7}
+# Attach cluster ids to full df
+df_clustered <- df |>
+  left_join(
+    clustering_data |> select(id, cluster),
+    by = "id"
+  ) |>
+  filter(!is.na(cluster))
+
+# --- Top neighbourhoods by cluster ---
+cluster_neighborhood <- df_clustered |>
+  filter(!is.na(cluster), !is.na(neighbourhood_cleansed)) |>
+  count(cluster, neighbourhood_cleansed) |>
+  # make cluster numeric so it joins cleanly with cluster_names
+  mutate(cluster = as.integer(as.character(cluster))) |>
+  left_join(
+    cluster_names |> select(cluster, cluster_name_short),
+    by = "cluster"
+  ) |>
+  group_by(neighbourhood_cleansed) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ungroup() |>
+  group_by(cluster, cluster_name_short) |>
+  slice_max(pct, n = 5, with_ties = FALSE) |>
+  ungroup()
+
+cat("\n=== TOP NEIGHBOURHOODS BY CLUSTER (share of listings in each neighbourhood) ===\n")
+print(cluster_neighborhood)
+
+# --- Plot: top neighbourhoods for each cluster ---
+cluster_neighborhood_plot <- cluster_neighborhood |>
+  mutate(
+    neighbourhood_cleansed =
+      forcats::fct_reorder(neighbourhood_cleansed, pct)
+  ) |>
+  ggplot(aes(x = neighbourhood_cleansed, y = pct, fill = cluster_name_short)) +
+  geom_col(alpha = 0.9, show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(
+    ~ cluster_name_short,
+    scales = "free_y",
+    ncol = 3,
+    labeller = label_wrap_gen(width = 20)   # <-- wrap long cluster titles
+  ) +
+  labs(
+    title = "Top Neighbourhoods for Each Cluster",
+    x = "Neighbourhood",
+    y = "Share of Listings in Neighbourhood (%)"
+  ) +
+  theme_transparent() +
+  theme(
+    plot.title = element_text(
+      face = "bold", size = 16, color = theme_colors$text
+    ),
+
+    # --- fix truncated facet titles ---
+    strip.text = element_text(
+      face = "bold",
+      size = 12,
+      margin = margin(t = 10, r = 5, b = 10, l = 5)
+    ),
+
+    # more padding around the whole plot (prevents clipping)
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+print(cluster_neighborhood_plot)
+```
+
+---
+
+# References and Data Sources
+
+- **Dataset**: Boston Airbnb Detailed Listings (`listings_detailed.csv`)
+- **Analysis Date**: `r Sys.Date()`
+- **Tools**: R (tidyverse, ggplot2, leaflet, cluster, forecast)
+
+---
+
+*Analysis conducted by Fall Foliage Team*
