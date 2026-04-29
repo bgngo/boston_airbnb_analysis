@@ -25,7 +25,7 @@ The primary dataset for this project is the open-source listings_detailed.csv fr
 The main dataset for the project is the open source listings_detailed.csv from the Airbnb website. It contains Boston, MA area listings as of September, 2025. There are 4,419 observations and 79 variables describing hosts, reviews and detailed characteristics of the listings. The initial examination of the variable types and statistics revealed that the empty values were encoded as empty strings, "NA", "N/A", or "null". For consistency the aforementioned were standardized to NA after the import. There were several columns with a high percentage of missing values, including variables related to reviews and ratings. Further standardization was needed for columns that had numeric values accompanied with symbols, such as price values containing dollar character signs (\$). The statistics also showed the widespread behaviour of the accommodation characteristic values  ranging from 0 to 15 for bedrooms and the price of listings reaching to $50.000. Overall, this step underscored the importance of detailed preprocessing, revealing that for an apparently clean dataset there is still a need to ensure accuracy and reliability.
 
 ```{r missing data, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/missing_data_analysis-1.png") 
+knitr::include_graphics("viz/missing_data_analysis-1.png") 
 ```
 
 The missing-data analysis showed that 42 out of 79 variables contained missing values. The key variables price, review_scores_, first_review, last_review contained nearly 20% missingness. 
@@ -48,7 +48,7 @@ The neighbourhood_group_cleansed variable was fully missing in our dataset, so w
 #### 1.1. Superhosts vs. Regular Hosts Performance
 
 ```{r host_analysis_1, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/superhost_analysis-1.png")
+knitr::include_graphics("viz/superhost_analysis-1.png")
 ```
 
 This comparison highlights clear differences in performance between Superhosts and regular hosts across multiple dimensions. Superhosts exhibit substantially higher occupancy rates, slightly higher average ratings, and notably higher annual revenue  Together, these patterns suggest that host reliability and quality—captured by Superhost status—are strongly associated with improved listing performance.
@@ -56,7 +56,7 @@ This comparison highlights clear differences in performance between Superhosts a
 #### 1.2 Average Revenue by Host Response Rate
 
 ```{r host_analysis_2, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/host_type_revenue-1.png")
+knitr::include_graphics("viz/host_type_revenue-1.png")
 ```
 
 Average annual revenue increases with host response rate for both Superhosts and regular hosts. This relationship emphasizes the importance of timely communication in securing bookings and maximizing revenue. While Superhosts earn more than regular hosts at every response rate level, the gap is particularly large at high response rates. An outlier appears among Superhosts with very low response rates (0–50 percent), who still generate unusually high revenue. This likely reflects a small number of exceptional or professionally managed listings rather than a general pattern, reinforcing that high response rates are an important driver of performance for most hosts.
@@ -64,7 +64,7 @@ Average annual revenue increases with host response rate for both Superhosts and
 #### 1.3 Average Revenue by Host Portfolio
 
 ```{r host_analysis_3, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/portfolio_vs_listing_revenue_host_type-1.png")
+knitr::include_graphics("viz/portfolio_vs_listing_revenue_host_type-1.png")
 ```
 
 Revenue per listing does not have a positive relationship with host portfolio size. Instead, Superhosts with smaller portfolios earn the highest revenue per listing, while revenue per listing declines as portfolio size grows. This suggests diminishing returns to scale, where managing a larger number of properties may reduce the ability to maintain high performance at the individual listing level. Regular hosts display a similar pattern, with revenue per listing peaking at moderate portfolio sizes before declining. These results indicate that focusing on a smaller, more manageable set of listings may be more profitable on a per-listing basis than expanding.
@@ -72,7 +72,7 @@ Revenue per listing does not have a positive relationship with host portfolio si
 #### 1.4 Annual Revenue Time Series by Host Experience
 
 ```{r host_analysis_4, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/time_series_experience-1.png")
+knitr::include_graphics("viz/time_series_experience-1.png")
 ```
 
 Annual revenue remains relatively stable across different levels of host experience. Hosts who have recently joined the platform earn comparable revenue to those who have been hosting for many years, suggesting that experience alone does not guarantee higher earnings. This finding implies that success on Airbnb depends more on current listing attributes, pricing, and host behavior than on tenure. In other words, newer hosts are able to compete effectively with more experienced hosts if they adopt effective strategies early on.
@@ -85,7 +85,7 @@ When analyzing Airbnb listings, an important focus is the properties themselves.
 #### 2.1. Room and Property Type Analysis
 
 ```{r property_analysis_1, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/room_property_type_plots-1.png")
+knitr::include_graphics("viz/room_property_type_plots-1.png")
 ```
 
 First, we analyzed the distribution of room types, which includes entire homes or apartments, private rooms, hotel rooms, and shared rooms. As expected, the most common room type is an entire home or apartment, accounting for 67.66% of listings, followed by private rooms at 30.91%. Hotel room listings are rare, which aligns with the fact that travelers can book hotels directly. Shared rooms are even less common, likely because guests generally prefer not to share spaces with strangers.
@@ -95,7 +95,7 @@ Next, we analyzed the distribution of property types, which indicates whether a 
 After cleaning the data, we created a bar chart to visualize the distribution of property types. We found that “rental unit” accounted for the largest share of listings at 64.95%, followed by “home” at 13.67%. This suggests that hosts may prefer listing rental units because they are more cost-effective and easier to maintain than homes, particularly in urban areas like Boston.
 
 ```{r property_analysis_2, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/prop_room_type_values-1.png")
+knitr::include_graphics("viz/prop_room_type_values-1.png")
 ```
 
 To get a better sense of how different property characteristics affect guest experience, we looked at how room type and property type work together and how that relates to guest satisfaction. We used the review_scores_value variable, which basically measures how well guests felt the listing matched the price they paid (on a scale of 0 to 5, with 5 being the best). We plotted these relationships in a heat map, where each tile shows the average value score for a specific room–property type combination. Even though the scores only range from about 4.4 to 4.8, those small differences matter on Airbnb; tenths of a point can affect how often a listing shows up in search results and whether guests choose it over similar options.
@@ -111,7 +111,7 @@ Overall, these insights can help new hosts understand which property types are n
 This section focuses on the location of properties, specifically which neighbourhoods in Boston are most commonly listed compared to which neighbourhoods have more guest engagement or satisfaction.
 
 ```{r property_analysis_3, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/plot_location_distributions-1.png")
+knitr::include_graphics("viz/plot_location_distributions-1.png")
 ```
 
 For the first horizontal bar chart, we plotted the top 10 neighbourhoods by number of listings. This showed that Dorchester is the most commonly listed location, making up 12.94% of all listings.
@@ -127,7 +127,7 @@ We also created a bar chart focusing on the top 10 neighbourhoods by average loc
 In this section, 23 looked at how many amenities different property types typically offer and how those amenities relate to their average review score value.
 
 ```{r property_analysis_4, echo=FALSE}
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/property_and_amenities-1.png")
+knitr::include_graphics("viz/property_and_amenities-1.png")
 ```
 
 To explore this, we created a bar chart showing the average number of amenities for each property type and ordered the bars by average review score value. At a quick glance, property types with more amenities, such as townhouses and guest suites, also tend to have higher review score values. On the other hand, property types with fewer amenities, such as hotels, score lower on average.
@@ -142,7 +142,7 @@ The goal here was simply to see whether certain property types consistently offe
 To understand the underlying pricing behaviour of Boston Airbnb listings, we did an exploratory analysis with three interconnected visualizations: a histogram of nightly rates, a violin plot of price density, and a categorical distribution of price tiers.
 
 ```{r price distribution, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/price_distribution-1.png") 
+knitr::include_graphics("viz/price_distribution-1.png") 
 ```
 
 The distribution of nightly prices reveals substantial variation across Boston Airbnb listings. As shown in the accompanying visualizations, prices below \$500 dominate the dataset, yet the overall distribution is **strongly right-skewed**. The **mean nightly rate is $773.56**, while the **median is much lower at $207**, indicating that a small number of extremely expensive stays raise the average considerably.
@@ -158,7 +158,7 @@ Overall, the pricing analysis suggests that Boston’s short-term rental market 
 ##### 3.2.1. Price by Room Type
 
 ```{r price distribution plot, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/price_bivariate-1.png") 
+knitr::include_graphics("viz/price_bivariate-1.png") 
 ```
 
 The first visualization shows clear differences in price across room types.
@@ -195,7 +195,7 @@ Overall, the bivariate analysis reveals that:
 We hypothesize that the revenue outcomes for Airbnbs fundamentally depends on both price and occupancy rate. To visualize, we plot a heatmap to observe the complex interaction between price and occupancy rates on revenue outcomes.
 
 ```{r revenue_1, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/rev_heatmap-1.png") 
+knitr::include_graphics("viz/rev_heatmap-1.png") 
 ```
 
 **Observations:**
@@ -215,7 +215,7 @@ knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/rev_heatmap
 Upon understanding revenue mechanics, we want to explore where opportunities exist geographically. Looking at practical market reality would help host identify positioning opportunities. We plot paired bar charts to investigate geographic variations in pricing and revenue performance, and include color-coded intensity by listing count and occupancy rate to add market density contexts.
 
 ```{r revenue_2, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/neighbourhood_analysis-1.png") 
+knitr::include_graphics("viz/neighbourhood_analysis-1.png") 
 ```
 
 **Observations:**
@@ -240,7 +240,7 @@ To build a comprehensive pricing narrative, we plot the following graphs: a fund
 We use a scatter plot to explore out hypothesis of diminishing returns of higher nightly rates.
 
 ```{r revenue_3, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/rev test-2.png") 
+knitr::include_graphics("viz/rev test-2.png") 
 ```
 
 **Observations:**
@@ -255,7 +255,7 @@ knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/rev test-2.
 #### 3.5.2. Revenue Elasticity Charts (Price & Occupancy) 
 
 ```{r revenue_4, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/unnamed-chunk-1-1.png") 
+knitr::include_graphics("viz/rev-elasticity.png") 
 ```
 
 **Observations:**
@@ -273,7 +273,7 @@ knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/unnamed-chu
 We want to address controllable operational decisions. We want to answer the questions "What should I offer?" and "What booking policies should I set?" to provide actionable tactics that hosts can implement immediately.
 
 ```{r revenue_5, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/eff-1.png") 
+knitr::include_graphics("viz/eff-1.png") 
 ```
 
 **Observations** Some amenity-count increases correlate with sizeable positive revenue jumps, while others coincide with negligible or even negative changes, suggesting highly uneven returns.
@@ -288,7 +288,7 @@ knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/eff-1.png")
 We want to conclude this analysis section by exploring the assumptions about host experience. We plot the following chart to see whether tenure or execution matters more.
 
 ```{r revenue_6, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/rev test-3.png") 
+knitr::include_graphics("viz/rev test-3.png") 
 ```
 
 **Observations:**
@@ -308,7 +308,7 @@ To determine the appropriate number of clusters for the segmentation analysis, w
 diagnostic methods: the Elbow Method and the Silhouette Method.
 
 ```{r cluster number diagnostic method, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/optimal_clusters-1.png") 
+knitr::include_graphics("viz/optimal_clusters-1.png") 
 ```
 
 The Elbow Method plot shows a steep decline in within-cluster sum of squares (WSS) from k = 1 to k = 3, followed by a more gradual decrease. The curve begins to flatten around k = 4 to k=5, indicating diminishing returns in cluster compactness beyond this point. However, still there is not an apparent elbow that would indicate the best number of clusters. The Silhouette Method, which measures how well-separated and well-structured the clusters are, shows a peak silhouette score around k = 5, with values decreasing for larger k. In this case, the diagnostic indicates an optimal k=5 for a balanced clustering. This value was therefore selected for the final clustering solution used throughout the analysis. As a result, the final clustering solution identified five meaningful segments:
@@ -320,11 +320,11 @@ The Elbow Method plot shows a steep decline in within-cluster sum of squares (WS
 - **Low-Demand Homes**
 
 ```{r clustering plot, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/cluster_geography-1.png") 
+knitr::include_graphics("viz/cluster_geography-1.png") 
 ```
 
 ```{r clustering plot 2, echo=FALSE} 
-knitr::include_graphics("Detailed_Listings_Analysis_files/figure-gfm/cluster_characterization-1.png") 
+knitr::include_graphics("viz/cluster_characterization-1.png") 
 ```
 
 The Luxury Hotel Cluster represents a very small set of ultra-luxury, high-revenue listings that behave fundamentally differently from the rest of the Boston market. Their uniformly high review scores and large guest capacity suggest that they are not typical home-share listings but likely correspond to hotel penthouses, luxury suites, or commercial group accommodations that also appear on Airbnb. Standard Mid-Tier Home cluster show an overall high Airbnb activity and consistent demand for moderate-priced, well-reviewed units. In contrast, Amenity-Rich Large Homes cluster offers larger housing stock and attracts groups, families, and visitors seeking upgraded amenities or extended stays. Low-Demand Homes tend to have a weaker performance and are concentrated in Mattapan, Charleswood areas, far from the city center. listing performance tends to be weaker. Underperforming Units cluster in the Leather District, Bay Village, the West End, and parts of South Boston, reflecting small sections of low-occupancy or lower-rated listings even within high-demand regions. Overall, the plot demonstrates that each cluster aligns with meaningful spatial and economic patterns.
