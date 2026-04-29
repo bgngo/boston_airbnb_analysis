@@ -526,7 +526,7 @@ increases.
 
 #### 3.5.2. Revenue Elasticity Charts (Price & Occupancy)
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/unnamed-chunk-1-1.png" width="3600" />
+<img src="Detailed_Listings_Analysis_files/figure-gfm/rev-elasticity.png" width="3600" />
 
 **Observations:**
 
