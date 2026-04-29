@@ -64,7 +64,7 @@ this step underscored the importance of detailed preprocessing,
 revealing that for an apparently clean dataset there is still a need to
 ensure accuracy and reliability.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/missing_data_analysis-1.png" width="3600" />
+<img src="viz/missing_data_analysis-1.png" width="3600" />
 
 The missing-data analysis showed that 42 out of 79 variables contained
 missing values. The key variables price, review_scores\_, first_review,
@@ -130,7 +130,7 @@ perspective and a host perspective.
 
 #### 1.1. Superhosts vs. Regular Hosts Performance
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/superhost_analysis-1.png" width="3600" />
+<img src="viz/superhost_analysis-1.png" width="3600" />
 
 This comparison highlights clear differences in performance between
 Superhosts and regular hosts across multiple dimensions. Superhosts
@@ -141,7 +141,7 @@ status—are strongly associated with improved listing performance.
 
 #### 1.2 Average Revenue by Host Response Rate
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/host_type_revenue-1.png" width="3600" />
+<img src="viz/host_type_revenue-1.png" width="3600" />
 
 Average annual revenue increases with host response rate for both
 Superhosts and regular hosts. This relationship emphasizes the
@@ -156,7 +156,7 @@ rates are an important driver of performance for most hosts.
 
 #### 1.3 Average Revenue by Host Portfolio
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/portfolio_vs_listing_revenue_host_type-1.png" width="3600" />
+<img src="viz/portfolio_vs_listing_revenue_host_type-1.png" width="3600" />
 
 Revenue per listing does not have a positive relationship with host
 portfolio size. Instead, Superhosts with smaller portfolios earn the
@@ -171,7 +171,7 @@ a per-listing basis than expanding.
 
 #### 1.4 Annual Revenue Time Series by Host Experience
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/time_series_experience-1.png" width="3600" />
+<img src="viz/time_series_experience-1.png" width="3600" />
 
 Annual revenue remains relatively stable across different levels of host
 experience. Hosts who have recently joined the platform earn comparable
@@ -194,7 +194,7 @@ the area.
 
 #### 2.1. Room and Property Type Analysis
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/room_property_type_plots-1.png" width="4500" />
+<img src="viz/room_property_type_plots-1.png" width="4500" />
 
 First, we analyzed the distribution of room types, which includes entire
 homes or apartments, private rooms, hotel rooms, and shared rooms. As
@@ -221,7 +221,7 @@ for the largest share of listings at 64.95%, followed by “home” at
 they are more cost-effective and easier to maintain than homes,
 particularly in urban areas like Boston.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/prop_room_type_values-1.png" width="6000" />
+<img src="viz/prop_room_type_values-1.png" width="6000" />
 
 To get a better sense of how different property characteristics affect
 guest experience, we looked at how room type and property type work
@@ -259,7 +259,7 @@ This section focuses on the location of properties, specifically which
 neighbourhoods in Boston are most commonly listed compared to which
 neighbourhoods have more guest engagement or satisfaction.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/plot_location_distributions-1.png" width="4500" />
+<img src="viz/plot_location_distributions-1.png" width="4500" />
 
 For the first horizontal bar chart, we plotted the top 10 neighbourhoods
 by number of listings. This showed that Dorchester is the most commonly
@@ -303,7 +303,7 @@ In this section, 23 looked at how many amenities different property
 types typically offer and how those amenities relate to their average
 review score value.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/property_and_amenities-1.png" width="4500" />
+<img src="viz/property_and_amenities-1.png" width="4500" />
 
 To explore this, we created a bar chart showing the average number of
 amenities for each property type and ordered the bars by average review
@@ -329,7 +329,7 @@ listings, we did an exploratory analysis with three interconnected
 visualizations: a histogram of nightly rates, a violin plot of price
 density, and a categorical distribution of price tiers.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/price_distribution-1.png" width="3600" />
+<img src="viz/price_distribution-1.png" width="3600" />
 
 The distribution of nightly prices reveals substantial variation across
 Boston Airbnb listings. As shown in the accompanying visualizations,
@@ -364,7 +364,7 @@ host strategies.
 
 ##### 3.2.1. Price by Room Type
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/price_bivariate-1.png" width="3600" />
+<img src="viz/price_bivariate-1.png" width="3600" />
 
 The first visualization shows clear differences in price across room
 types.
@@ -426,7 +426,7 @@ depends on both price and occupancy rate. To visualize, we plot a
 heatmap to observe the complex interaction between price and occupancy
 rates on revenue outcomes.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/rev_heatmap-1.png" width="3600" />
+<img src="viz/rev_heatmap-1.png" width="3600" />
 
 **Observations:**
 
@@ -464,7 +464,7 @@ charts to investigate geographic variations in pricing and revenue
 performance, and include color-coded intensity by listing count and
 occupancy rate to add market density contexts.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/neighbourhood_analysis-1.png" width="3600" />
+<img src="viz/neighbourhood_analysis-1.png" width="3600" />
 
 **Observations:**
 
@@ -499,7 +499,7 @@ combinations.
 We use a scatter plot to explore out hypothesis of diminishing returns
 of higher nightly rates.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/rev test-2.png" width="3600" />
+<img src="viz/rev test-2.png" width="3600" />
 
 **Observations:**
 
@@ -526,7 +526,7 @@ increases.
 
 #### 3.5.2. Revenue Elasticity Charts (Price & Occupancy)
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/rev-elasticity.png" width="3600" />
+<img src="viz/rev-elasticity.png" width="3600" />
 
 **Observations:**
 
@@ -558,7 +558,7 @@ the questions “What should I offer?” and “What booking policies should I
 set?” to provide actionable tactics that hosts can implement
 immediately.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/eff-1.png" width="3600" />
+<img src="viz/eff-1.png" width="3600" />
 
 **Observations** Some amenity-count increases correlate with sizeable
 positive revenue jumps, while others coincide with negligible or even
@@ -581,7 +581,7 @@ We want to conclude this analysis section by exploring the assumptions
 about host experience. We plot the following chart to see whether tenure
 or execution matters more.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/rev test-3.png" width="3600" />
+<img src="viz/rev test-3.png" width="3600" />
 
 **Observations:**
 
@@ -612,7 +612,7 @@ To determine the appropriate number of clusters for the segmentation
 analysis, we evaluated two diagnostic methods: the Elbow Method and the
 Silhouette Method.
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/optimal_clusters-1.png" width="3600" />
+<img src="viz/optimal_clusters-1.png" width="3600" />
 
 The Elbow Method plot shows a steep decline in within-cluster sum of
 squares (WSS) from k = 1 to k = 3, followed by a more gradual decrease.
@@ -633,9 +633,9 @@ meaningful segments:
 - **Underperforming Units**
 - **Low-Demand Homes**
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/cluster_geography-1.png" width="4200" />
+<img src="viz/cluster_geography-1.png" width="4200" />
 
-<img src="Detailed_Listings_Analysis_files/figure-gfm/cluster_characterization-1.png" width="3600" />
+<img src="viz/cluster_characterization-1.png" width="3600" />
 
 The Luxury Hotel Cluster represents a very small set of ultra-luxury,
 high-revenue listings that behave fundamentally differently from the
